@@ -1,0 +1,120 @@
+{
+  "id": "openclaw-monitor",
+  "name": "OpenClaw Monitor",
+  "description": "Real-time monitoring console: aggregates diagnostic events, exposes overview / events / runs / logs REST endpoints, streams live events over SSE, and serves a self-contained dashboard at /monitor.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "buffer": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxPerType": {
+            "type": "integer",
+            "minimum": 16,
+            "maximum": 65536,
+            "default": 1024,
+            "description": "Maximum events retained in memory per event type (hot path)."
+          }
+        }
+      },
+      "storage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": ["jsonl", "memory"],
+            "default": "jsonl",
+            "description": "Persistence mode. `memory` disables on-disk storage entirely."
+          },
+          "path": {
+            "type": "string",
+            "description": "Override the storage directory. Defaults to ${stateDir}/openclaw-monitor."
+          }
+        }
+      },
+      "retention": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "eventsDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "default": 7
+          },
+          "runsDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 90
+          }
+        }
+      },
+      "ui": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Serve the static dashboard at /monitor."
+          }
+        }
+      },
+      "stream": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxSubscribers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256,
+            "default": 16
+          },
+          "heartbeatMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "default": 15000
+          }
+        }
+      },
+      "audit": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Conversation content audit. Captures the four touchpoints (project → OpenClaw, OpenClaw → LLM, LLM → OpenClaw, OpenClaw → project) via plugin hooks. Disabled by default — opt in when you accept the privacy and storage tradeoffs.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, captures full prompt and response text. Storage grows with conversation volume."
+          },
+          "contentMaxBytes": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 1048576,
+            "default": 16384,
+            "description": "Truncate any single content string longer than this. Truncated segments are flagged with truncated=true."
+          },
+          "retainDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 3,
+            "description": "Daily JSONL files older than this are deleted. Keep this short — content files grow much faster than event files."
+          },
+          "captureSystemPrompt": {
+            "type": "boolean",
+            "default": false,
+            "description": "When false, the system prompt is omitted from llm_input segments. Many deployments treat the system prompt as a commercial secret."
+          }
+        }
+      }
+    }
+  }
+}

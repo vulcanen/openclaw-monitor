@@ -1,0 +1,56 @@
+{
+  "name": "@vulcanen/openclaw-monitor",
+  "version": "0.1.0",
+  "description": "Self-contained real-time monitoring console for OpenClaw",
+  "type": "module",
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "npm run build:plugin && npm run build:ui",
+    "build:plugin": "tsc -p tsconfig.json",
+    "build:ui": "cd ui && npm run build",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:ui": "cd ui && npm run typecheck",
+    "ui:install": "cd ui && npm install",
+    "prepublishOnly": "npm run clean && npm run build && npm run test"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "install": {
+      "npmSpec": "@vulcanen/openclaw-monitor",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.5.7"
+    },
+    "compat": {
+      "pluginApi": ">=2026.5.7"
+    },
+    "build": {
+      "openclawVersion": "2026.5.7",
+      "pluginSdkVersion": "2026.5.7"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openclaw": "2026.5.7",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {},
+  "publishConfig": {
+    "registry": "https://registry.npmmirror.com/",
+    "access": "restricted"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "UNLICENSED",
+  "private": false
+}
