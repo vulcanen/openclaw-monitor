@@ -1,6 +1,6 @@
 {
   "name": "@vulcanen/openclaw-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-contained real-time monitoring console for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",
@@ -45,8 +45,8 @@
   },
   "dependencies": {},
   "publishConfig": {
-    "registry": "https://registry.npmmirror.com/",
-    "access": "restricted"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "engines": {
     "node": ">=22"

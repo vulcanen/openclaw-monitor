@@ -245,11 +245,32 @@ describe("event fanout", () => {
 describe("conversation probe", () => {
   type CapturedHandlers = Record<string, (event: unknown, ctx: unknown) => unknown>;
 
-  const makeFakeApi = (handlers: CapturedHandlers) => ({
-    on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
-      handlers[name] = handler;
-    },
-  });
+  const makeFakeApi = (
+    handlers: CapturedHandlers,
+    hostFlags: { auditEnabled?: boolean; allowConversationAccess?: boolean } = {},
+  ) => {
+    const audit = hostFlags.auditEnabled ?? true;
+    const allow = hostFlags.allowConversationAccess ?? true;
+    return {
+      on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+        handlers[name] = handler;
+      },
+      runtime: {
+        config: {
+          current: () => ({
+            plugins: {
+              entries: {
+                "openclaw-monitor": {
+                  hooks: { allowConversationAccess: allow },
+                  audit: { enabled: audit },
+                },
+              },
+            },
+          }),
+        },
+      },
+    };
+  };
 
   it("ignores hook calls when disabled", async () => {
     const { createConversationProbe } = await import("./audit/conversation-probe.js");
@@ -263,6 +284,28 @@ describe("conversation probe", () => {
     handlers["agent_end"]?.({ runId: "r1", messages: [], success: true }, { runId: "r1" });
     expect(probe.activeCount()).toBe(0);
     expect(probe.recentCompleted()).toHaveLength(0);
+  });
+
+  it("does not register conversation hooks when host gates are off", async () => {
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers, { allowConversationAccess: false }) as never);
+    // before_prompt_build is non-gated, should always register
+    expect(typeof handlers["before_prompt_build"]).toBe("function");
+    // gated hooks should NOT register
+    expect(handlers["llm_input"]).toBeUndefined();
+    expect(handlers["llm_output"]).toBeUndefined();
+    expect(handlers["agent_end"]).toBeUndefined();
+  });
+
+  it("does not register conversation hooks when audit is disabled in plugin config", async () => {
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers, { auditEnabled: false }) as never);
+    expect(typeof handlers["before_prompt_build"]).toBe("function");
+    expect(handlers["llm_input"]).toBeUndefined();
   });
 
   it("accumulates 4 touchpoints and finalizes on agent_end", async () => {

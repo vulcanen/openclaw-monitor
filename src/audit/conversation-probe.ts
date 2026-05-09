@@ -10,6 +10,7 @@ import type {
 const ELLIPSIS = "…[truncated]";
 const MAX_RECENT_COMPLETED = 50;
 const MAX_HISTORY_ITEMS = 64;
+const PLUGIN_ID = "openclaw-monitor";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -49,6 +50,28 @@ const DISABLED_CONFIG: AuditConfig = {
   retainDays: 3,
   captureSystemPrompt: false,
 };
+
+function readHostAuditFlags(api: OpenClawPluginApi): {
+  auditEnabled: boolean;
+  allowConversationAccess: boolean;
+} {
+  try {
+    const config = api.runtime.config.current() as unknown as {
+      plugins?: {
+        entries?: Record<string, unknown>;
+      };
+    };
+    const entry = config.plugins?.entries?.[PLUGIN_ID] as
+      | { hooks?: { allowConversationAccess?: boolean }; audit?: { enabled?: boolean } }
+      | undefined;
+    return {
+      auditEnabled: entry?.audit?.enabled === true,
+      allowConversationAccess: entry?.hooks?.allowConversationAccess === true,
+    };
+  } catch {
+    return { auditEnabled: false, allowConversationAccess: false };
+  }
+}
 
 export function createConversationProbe(): ConversationProbe {
   const state: ProbeState = {
@@ -102,6 +125,7 @@ export function createConversationProbe(): ConversationProbe {
   };
 
   const installHooks: ConversationProbe["installHooks"] = (api) => {
+    // Always register the non-gated hook (records the inbound prompt).
     api.on("before_prompt_build", (event, ctx) => {
       if (!state.config.enabled) return;
       const runId = ctx.runId;
@@ -124,12 +148,26 @@ export function createConversationProbe(): ConversationProbe {
       };
     });
 
+    // Conditional registration: only when the host explicitly grants
+    // `plugins.entries.openclaw-monitor.hooks.allowConversationAccess` AND
+    // the plugin's own `audit.enabled` is true. Without both, we don't even
+    // attempt to register, which keeps host logs clean instead of emitting
+    // "blocked" notices for every conversation hook.
+    const { auditEnabled, allowConversationAccess } = readHostAuditFlags(api);
+    if (!(auditEnabled && allowConversationAccess)) {
+      return;
+    }
+
     api.on("llm_input", (event, ctx) => {
       if (!state.config.enabled) return;
       const runId = event.runId ?? ctx.runId;
       if (!runId) return;
       const record = ensureRecord(runId, {
-        ...(event.sessionId ? { sessionId: event.sessionId } : ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+        ...(event.sessionId
+          ? { sessionId: event.sessionId }
+          : ctx.sessionId
+            ? { sessionId: ctx.sessionId }
+            : {}),
         ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
         ...(ctx.channelId !== undefined ? { channelId: ctx.channelId } : {}),
         ...(ctx.trigger !== undefined ? { trigger: ctx.trigger } : {}),

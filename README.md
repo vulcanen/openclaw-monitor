@@ -4,11 +4,18 @@
 
 ## 项目现状
 
-- 版本：`0.1.0`（待发布）
+- 版本：`0.2.0`
 - 适配 host：OpenClaw `>=2026.5.7`（`compat.pluginApi: ">=2026.5.7"`）
-- 发布目标：(removed)私库 `https://registry.npmmirror.com/`，scope `@vulcanen`
+- 发布目标：公开 npm `https://registry.npmjs.org/`，scope `@vulcanen`（个人 scope）
+- 安装侧默认走公司代理 `https://registry.npmmirror.com/`（已镜像 npmjs 上游，`@vulcanen/...` 也能拉到）
 - 测试：18 个单元测试，全部通过
-- 构建产物：~195 KB packed / ~725 KB unpacked，零运行时 npm 依赖（仅 `openclaw` 作为 devDependency 取类型）
+- 构建产物：~200 KB packed / ~730 KB unpacked，零运行时 npm 依赖（仅 `openclaw` 作为 devDependency 取类型）
+
+## v0.2.0 新增
+
+- **UI 浏览器可直接访问**：`/monitor/*` 静态资源公开，UI 自己处理 token（localStorage + Authorization 头），不再被 OpenClaw 的 trusted-operator 网关阻挡
+- **零脚手架**：新增 `openclaw monitor setup [--audit]` CLI 命令，一行写好 `plugins.allow` 和（可选的）`hooks.allowConversationAccess` + `audit.enabled`
+- **静默默认状态**：默认不注册 `llm_input/llm_output/agent_end` hook（消除 OpenClaw 的 "blocked" info 日志），仅在 `audit.enabled` + `allowConversationAccess` 同时为真时启用 M5
 
 ## 已实现功能
 
@@ -47,12 +54,25 @@
 ### 部署侧（OpenClaw 主机）
 
 ```bash
+# 1. 装插件
 openclaw plugins install npm:@vulcanen/openclaw-monitor
+
+# 2. 一键 setup（把自己加进 plugins.allow，消除安装后的警告）
+openclaw monitor setup
+# 想启用对话内容审计就加 --audit:
+# openclaw monitor setup --audit
+
+# 3. 重启
 openclaw gateway restart
+
+# 4. 验证
+openclaw monitor status   # 看三个开关状态
 openclaw plugins inspect openclaw-monitor --runtime --json
 ```
 
-打开浏览器：`http://<gateway-host>:<port>/monitor/`
+**打开浏览器**：`http://<gateway-host>:<port>/monitor/`
+
+第一次进会看到 token 输入页（不再被 OpenClaw 网关 401），从 `openclaw config get gateway.auth.token` 拿到 token 粘进去就能用。Token 仅存浏览器 localStorage。
 
 ### 配置示例
 
@@ -102,7 +122,7 @@ plugins:
 ## 开发
 
 ```bash
-# 安装依赖（使用 example 私库，npmrc 已配置）
+# 安装依赖（默认走公司代理，npmrc 已配置）
 npm install
 cd ui && npm install && cd ..
 
@@ -130,19 +150,22 @@ npm pack --dry-run
 # 1. 升版本号
 npm version <patch|minor|major> --no-git-tag-version
 
-# 2. 登录私库（首次）
-npm login --registry=https://registry.npmmirror.com/
+# 2. 登录公开 npm（首次）
+npm login --registry=https://registry.npmjs.org/
 
-# 3. 发布（自动跑 prepublishOnly: clean + build + test）
+# 3. 发布（package.json 已锁定 publishConfig.registry，自动跑 prepublishOnly: clean + build + test）
 npm publish
 ```
 
+> 安装侧依然走公司代理 `registry.npmmirror.com`（在 `.npmrc` 配置），公司代理镜像了公开 npmjs 上游，因此发布到公开 npm 后内网仍能正常拉取 `@vulcanen/openclaw-monitor`。
+
 ## 注意事项
 
-- **隐私边界**：M5 内容审计抓取的是原始 prompt 和 assistant 文本，可能含 PII / 业务密钥。落盘文件是明文 JSONL。仪表板有 `trusted-operator` 权限保护，但请严格控制运维角色。
+- **UI 静态文件公开 ≠ 数据公开**：`/monitor/*` HTML/JS/CSS 不需要 token 即可加载，但所有 `/api/monitor/*` 数据接口仍要 `Authorization: Bearer <gateway-token>`。没 token 的人能看到登录页但看不到任何数据
+- **隐私边界**：M5 内容审计抓取的是原始 prompt 和 assistant 文本，可能含 PII / 业务密钥。落盘文件是明文 JSONL。
 - **存储增长**：开启 audit 后，存储增长与对话量相关。预估每对话 1-50 KB，按业务流量估算容量。
 - **多跳**：单次 OpenAI API 调用可能触发多次 `llm_input`/`llm_output`（agent 内部循环、tool use、failover）。UI 会平铺显示。
-- **不要把 dashboard 暴露公网**：内置 UI 默认权限已收敛，但仍只是给运维看的。
+- **不要把 dashboard 暴露公网**：内置 UI 是给运维看的，请走 VPN / 内网访问。
 
 ## 目录结构
 
@@ -154,7 +177,7 @@ openclaw-monitor/
 ├── openclaw.plugin.json                   OpenClaw 插件清单
 ├── tsconfig.json
 ├── vitest.config.ts
-├── .npmrc                                 example 私库配置
+├── .npmrc                                 公司代理 registry（用于安装）
 ├── src/                                   插件后端（5 层架构）
 │   ├── index.ts                           definePluginEntry 入口
 │   ├── service.ts                         装配 + 注册路由
@@ -181,4 +204,4 @@ openclaw-monitor/
 
 ## License
 
-UNLICENSED · (removed)内部使用
+UNLICENSED · 内部使用

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { openEventStream } from "../api.js";
+import { openEventStream, tokenStore } from "../api.js";
 
 const NAV_ITEMS: Array<{ to: string; label: string }> = [
   { to: "/overview", label: "Overview" },
@@ -56,6 +56,16 @@ export function Layout({ children }: { children: ReactNode }) {
           <span className="dot" />
           {live ? `live · ${eventCount} events seen` : "idle"}
         </div>
+        <button
+          className="logout"
+          title="clear token and re-enter"
+          onClick={() => {
+            tokenStore.clear();
+            window.location.reload();
+          }}
+        >
+          sign out
+        </button>
       </header>
       <main>{children}</main>
     </div>

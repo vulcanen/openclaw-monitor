@@ -1,4 +1,5 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { registerSetupCli } from "./cli/setup-command.js";
 import { createMonitorService } from "./service.js";
 
 export default definePluginEntry({
@@ -13,5 +14,6 @@ export default definePluginEntry({
       api.registerHttpRoute(route);
     }
     bundle.registerHooks(api);
+    registerSetupCli(api);
   },
 });

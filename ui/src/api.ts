@@ -1,4 +1,56 @@
 const BASE = "/api/monitor";
+const TOKEN_KEY = "openclaw-monitor:token";
+
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("unauthorized");
+    this.name = "UnauthorizedError";
+  }
+}
+
+export const tokenStore = {
+  get(): string | undefined {
+    try {
+      return window.localStorage.getItem(TOKEN_KEY) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  set(token: string): void {
+    try {
+      window.localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      // localStorage may be disabled (private browsing, etc.)
+    }
+  },
+  clear(): void {
+    try {
+      window.localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // ignore
+    }
+  },
+};
+
+const unauthorizedListeners = new Set<() => void>();
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+function notifyUnauthorized(): void {
+  for (const listener of unauthorizedListeners) {
+    try {
+      listener();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function authHeaders(): HeadersInit {
+  const token = tokenStore.get();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export type WindowSnapshot = {
   modelCalls: number;
@@ -140,9 +192,12 @@ export type ConversationRecord = {
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...authHeaders() },
   });
+  if (response.status === 401) {
+    notifyUnauthorized();
+    throw new UnauthorizedError();
+  }
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
   }
@@ -195,15 +250,67 @@ export type StreamEvent = {
   event: { type: string; [k: string]: unknown };
 };
 
+/**
+ * Fetch-based SSE reader. Native EventSource cannot send custom headers, but
+ * we need to ship the Authorization bearer to the gateway. This minimal
+ * implementation parses SSE blocks (event:/data: lines, blank-line terminator)
+ * out of a streaming fetch response and dispatches the typed events we care
+ * about.
+ */
 export function openEventStream(onEvent: (evt: StreamEvent) => void): () => void {
-  const source = new EventSource(`${BASE}/stream`, { withCredentials: true });
-  source.addEventListener("diagnostic", (event) => {
+  const controller = new AbortController();
+  let stopped = false;
+
+  const consume = async (): Promise<void> => {
     try {
-      const data = JSON.parse((event as MessageEvent).data) as StreamEvent;
-      onEvent(data);
-    } catch {
-      // ignore malformed payloads
+      const response = await fetch(`${BASE}/stream`, {
+        headers: { Accept: "text/event-stream", ...authHeaders() },
+        signal: controller.signal,
+      });
+      if (response.status === 401) {
+        notifyUnauthorized();
+        return;
+      }
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!stopped) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf("\n\n")) >= 0) {
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          let eventName = "message";
+          const dataLines: string[] = [];
+          for (const line of block.split("\n")) {
+            if (line.startsWith(":")) continue;
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).replace(/^ /, ""));
+            }
+          }
+          if (eventName !== "diagnostic" || dataLines.length === 0) continue;
+          try {
+            onEvent(JSON.parse(dataLines.join("\n")) as StreamEvent);
+          } catch {
+            // skip malformed payload
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      // transient connection drop: silently exit; Layout will retry on remount
     }
-  });
-  return () => source.close();
+  };
+
+  void consume();
+
+  return () => {
+    stopped = true;
+    controller.abort();
+  };
 }

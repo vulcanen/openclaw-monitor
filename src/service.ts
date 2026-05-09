@@ -275,11 +275,15 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
   ];
 
   if (config.ui.enabled) {
+    // Static UI assets are intentionally public so a browser can load the
+    // HTML/CSS/JS bundle without an Authorization header. The bundle by itself
+    // exposes no data — every API call still goes through the gateway-auth
+    // routes above. The UI handles the gateway token client-side
+    // (localStorage + Authorization header on every fetch).
     routes.push({
       path: UI_BASE_PATH,
-      auth: "gateway",
+      auth: "plugin",
       match: "prefix",
-      gatewayRuntimeScopeSurface: "trusted-operator",
       handler: createStaticUiHandler({ basePath: UI_BASE_PATH }),
     });
   }

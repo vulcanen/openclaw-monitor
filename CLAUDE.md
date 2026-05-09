@@ -4,11 +4,11 @@
 
 ## 项目定位
 
-- **是什么**：`@vulcanen/openclaw-monitor` 是一个 OpenClaw 5.7 插件，用 npm 私库分发。
+- **是什么**：`@vulcanen/openclaw-monitor` 是一个 OpenClaw 5.7 插件，发布到公开 npm。
 - **解决什么**：OpenClaw 自身的诊断事件总线只对内可见，对运维是黑盒。这个插件把事件总线接出来，做聚合 / 持久化 / 实时推流 / 仪表板 / 内容审计。
 - **不解决什么**：不替代 Prometheus / Grafana / OTel Collector。OpenClaw 已自带 `diagnostics-otel` 和 `diagnostics-prometheus` 两个导出器，本插件与它们并存。
 - **不在范围**：不修改 OpenClaw core，不引入对其他 extension 私有 src/** 的依赖。
-- **scope/registry**：`@vulcanen` scope，发布到 `https://registry.npmmirror.com/`。
+- **scope/registry**：`@vulcanen` scope（npm 个人 scope，注册账号自动持有），发布到公开 npm `https://registry.npmjs.org/`。安装侧通过 `.npmrc` 走公司代理 `https://registry.npmmirror.com/`（已镜像 npmjs 上游）。
 
 ## 架构（必须按层改）
 
@@ -50,12 +50,22 @@
 1. **存储用 JSONL，不用 SQLite** —— OpenClaw 安装时强制 `--ignore-scripts`（[已验证](D:/projects/offical-openclaw/openclaw-2026.5.7/src/plugins/install.ts)），better-sqlite3 这类带 native postinstall 的包**装不上**。JSONL append-only + 按日期分文件，零原生依赖、retention 直接 `unlink` 旧文件。
 2. **零运行时 npm 依赖** —— `package.json` 的 `dependencies: {}` 是空的。`openclaw` 是 devDependency（仅取类型，runtime 由 host 注入）。UI 的 React/Recharts 全部打进 `dist/ui/assets/index-*.js` 静态文件。这是为了避免 host 上任何 install-time 的依赖解析失败。
 3. **HashRouter，不是 BrowserRouter** —— 静态 UI handler 不做 SPA fallback，所有客户端路由都在 hash 段（`#/overview`），后端不用感知。
-4. **scope 用 `@vulcanen`，不要用 `@openclaw`** —— [install.ts:189](D:/projects/offical-openclaw/openclaw-2026.5.7/src/plugins/install.ts) 对 `@openclaw/*` 有特殊"trusted official prerelease"路径，会改变版本解析行为。
+4. **scope 用 `@vulcanen`，不要用 `@openclaw`** —— [install.ts:189](D:/projects/offical-openclaw/openclaw-2026.5.7/src/plugins/install.ts) 对 `@openclaw/*` 有特殊"trusted official prerelease"路径，会改变版本解析行为。`@vulcanen` 是个人 scope，与 host 无任何特殊耦合。
 5. **公开 SDK 的 `onDiagnosticEvent` 单参** —— listener 签名是 `(evt) => void`，**没有 metadata**。只有 host 内部才有 `onInternalDiagnosticEvent` 的 metadata。任何想看 `trusted` 标记的代码都是错的。
 6. **不直接 import `@openclaw/plugin-sdk`** —— 那个包是 host 私有的（`private: true, version: 0.0.0-private`）。外部插件依赖 `openclaw` 主包，从 `openclaw/plugin-sdk/<sub>` 子路径导入。
-7. **HTTP 路由权限收敛到 `trusted-operator`** —— 所有 `/api/monitor/*` 与 `/monitor/*` 路由都用 `auth: "gateway"` + `gatewayRuntimeScopeSurface: "trusted-operator"`，不要降级。
-8. **M5 默认 opt-out** —— `audit.enabled: false`。改动 audit 模块时不要把默认改成 true，也不要在 audit 关闭时仍然写盘。
+7. **HTTP 路由权限分两类**：
+   - `/api/monitor/*`（数据接口）：`auth: "gateway"` + `gatewayRuntimeScopeSurface: "trusted-operator"`，**不要降级**。
+   - `/monitor/*`（静态 UI 资源）：`auth: "plugin"`（公开）。**这是有意为之**——浏览器没法在普通导航里加 Authorization 头，所以静态文件必须公开；UI 自己处理 token（localStorage + fetch headers）。**不要把它改回 `auth: "gateway"`**，否则浏览器永远 401。
+8. **M5 默认 opt-out + 条件注册** —— `audit.enabled: false` 是默认。改动 audit 模块时：
+   - 不要把默认改成 true
+   - 在 `conversation-probe.installHooks` 里**仅当 `audit.enabled` 与 `hooks.allowConversationAccess` 同时为真才注册** `llm_input/llm_output/agent_end` hook（避免 host 输出 "blocked" info 日志）
+   - `before_prompt_build` 不在 host 的 `CONVERSATION_HOOK_NAMES` 里，可以随时注册
+   - audit 关闭时即便 hook 触发也不写盘（probe state 自检）
 9. **路径解析用 `import.meta.url`** —— `static-ui.ts` 用 `path.dirname(fileURLToPath(import.meta.url))` 锚定 dist 目录，不要写死相对路径。
+
+10. **Setup CLI 通过 `runtime.config.mutateConfigFile`** —— `src/cli/setup-command.ts` 注册 `openclaw monitor setup` 命令。它**显式由用户触发**（而非 register 时静默修改 host config），写完用 `afterWrite: { mode: "restart", ... }` 让 host 知道要重启 gateway 才生效。**不要做"插件自己悄悄给自己加 plugins.allow"**——那会破坏 host 的安全模型。
+
+11. **SSE 用 fetch reader，不用原生 EventSource** —— 原生 EventSource 不支持自定义 header，加不上 Authorization。`ui/src/api.ts` 里的 `openEventStream` 是 fetch + ReadableStream + 手写 SSE 解析的实现。改它的时候注意保留 `data:` 多行合并和 blank-line 分块语义。
 
 ## 与 OpenClaw host 的接口契约
 
@@ -160,10 +170,12 @@ npm pack --dry-run                  # 看 tarball 内容
 - ❌ 改默认 `audit.enabled` 为 true
 - ❌ 加 native deps（better-sqlite3、sharp 之类）
 - ❌ 加 OpenClaw host 私有路径的 import
-- ❌ 用 `@openclaw/` scope
-- ❌ 把 HTTP 权限放宽到 `write-default` 或更低
+- ❌ 用 `@openclaw/` scope（host 有特殊路径，会变行为）
+- ❌ 把 `/api/monitor/*` 数据接口的权限放宽到 `write-default` 或更低
+- ❌ 把 `/monitor/*` 静态 UI 改回 `auth: "gateway"`（会让浏览器永远 401）
 - ❌ 在 `dependencies` 里加任何包（保持空）
 - ❌ 修改 git config（`user.email` / `user.name` 用户级已配置，不动）
+- ❌ 在 `register(api)` 里偷偷给自己加 `plugins.allow`（要走 `monitor setup` CLI，由用户显式触发）
 - ❌ 默认开启脱敏前直接捕获 prompt 内容并明文回显到外部日志
 
 ## 边界外的事
