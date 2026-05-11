@@ -91,6 +91,12 @@
 
 11. **SSE 用 fetch reader，不用原生 EventSource** —— 原生 EventSource 不支持自定义 header，加不上 Authorization。`ui/src/api.ts` 里的 `openEventStream` 是 fetch + ReadableStream + 手写 SSE 解析的实现。改它的时候注意保留 `data:` 多行合并和 blank-line 分块语义。
 
+12. **`register(api)` 可能被调用多次 — 必须 idempotent**（v0.5.2 修复，不要再回归）：OpenClaw 的 plugin loader 在不同 load profile（provider runtime / web-fetch runtime / agent-tool-result middleware / cli-registry-loader 等）会用不同的 `PluginLoadOptions` 触发独立的 `loadOpenClawPlugins`，cache miss 时会**完整重新跑** plugin entry 的 `register(api)`。
+    - 含义：state（buffer / aggregator / runs-tracker / JSONL store / SSE bus / conversation probe / 去重表）**必须**在 module-level 缓存成 singleton（`src/index.ts` 的 `sharedBundle`）。如果每次 register 新建一个 bundle，hook callback 会写到第二次 bundle 的 fanout，而 HTTP/SSE handler 还指向第一次 bundle 的 buffer —— 表现就是"hook fire 但监控页面全 0"，v0.5.0/0.5.1 都是这个 bug。
+    - `api.registerService` / `api.registerHttpRoute` / `api.registerCli` **只在第一次 register 调用**（用 `routesAndServiceWired` flag 锁住），后续 register 直接跳过 —— 同一 path 重复注册要么报错要么 shadow 第一个 handler，而且只有第一个 api 真正连到 gateway HTTP server。
+    - `bundle.registerHooks(api)` **每次 register 都要调**，因为不同 load profile 用不同的 hook 注册表；fanout 的 `callId`/`toolCallId` dedup 表会吸收重复 inject。
+    - 回归测试在 `src/service.test.ts > "plugin entry idempotency"`，改 entry 时务必跑。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：
