@@ -69,6 +69,26 @@ function readPluginConfig(ctx: OpenClawPluginServiceContext): Partial<MonitorCon
   return (raw && typeof raw === "object" ? (raw as Partial<MonitorConfig>) : {}) ?? {};
 }
 
+type HostGateState = {
+  inAllow: boolean;
+  allowConversationAccess: boolean;
+};
+
+function readHostGateState(ctx: OpenClawPluginServiceContext): HostGateState {
+  const cfg = ctx.config as unknown as {
+    plugins?: {
+      allow?: string[];
+      entries?: Record<string, { hooks?: { allowConversationAccess?: boolean } }>;
+    };
+  };
+  const allow = cfg.plugins?.allow ?? [];
+  const entry = cfg.plugins?.entries?.[PLUGIN_ID];
+  return {
+    inAllow: allow.includes(PLUGIN_ID),
+    allowConversationAccess: entry?.hooks?.allowConversationAccess === true,
+  };
+}
+
 export function createMonitorService(configOverride?: Partial<MonitorConfig>): MonitorBundle {
   let config = mergeConfig(configOverride);
 
@@ -126,6 +146,28 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       }
 
       conversationProbe.setConfig(config.audit);
+
+      // Read-only hint: when audit is enabled in plugin config but the host
+      // hasn't granted the matching security gate, log the exact command to
+      // run. The plugin intentionally does NOT auto-write host config (see
+      // project CLAUDE.md — auto-elevation is forbidden).
+      if (config.audit.enabled && ctx.logger) {
+        const gateState = readHostGateState(ctx);
+        if (!gateState.inAllow || !gateState.allowConversationAccess) {
+          const missing: string[] = [];
+          if (!gateState.inAllow) missing.push("plugins.allow");
+          if (!gateState.allowConversationAccess) {
+            missing.push(`plugins.entries.${PLUGIN_ID}.hooks.allowConversationAccess`);
+          }
+          ctx.logger.warn?.(
+            `[${PLUGIN_ID}] audit enabled but host gate(s) missing: ${missing.join(", ")}. ` +
+              `Channel-side audit (Control UI, message_received/sending) already works. ` +
+              `To also capture LLM input/output content, run: ` +
+              `\`openclaw monitor setup --audit && openclaw gateway restart\`.`,
+          );
+        }
+      }
+
       if (config.audit.enabled) {
         try {
           const auditStore = createConversationStore(resolveAuditRoot(ctx));

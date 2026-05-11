@@ -87,12 +87,12 @@
       "audit": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Conversation content audit. Captures the four touchpoints (project → OpenClaw, OpenClaw → LLM, LLM → OpenClaw, OpenClaw → project) via plugin hooks. Disabled by default — opt in when you accept the privacy and storage tradeoffs.",
+        "description": "Conversation content audit. Captures the four touchpoints (project → OpenClaw, OpenClaw → LLM, LLM → OpenClaw, OpenClaw → project) via plugin hooks. Enabled by default in v0.4.0+ — set audit.enabled=false to opt out.",
         "properties": {
           "enabled": {
             "type": "boolean",
-            "default": false,
-            "description": "When true, captures full prompt and response text. Storage grows with conversation volume."
+            "default": true,
+            "description": "When true, captures full prompt and response text. Storage grows with conversation volume. Set false to opt out."
           },
           "contentMaxBytes": {
             "type": "integer",
@@ -110,8 +110,8 @@
           },
           "captureSystemPrompt": {
             "type": "boolean",
-            "default": false,
-            "description": "When false, the system prompt is omitted from llm_input segments. Many deployments treat the system prompt as a commercial secret."
+            "default": true,
+            "description": "When true (default in v0.4.0+), the system prompt is included in llm_input segments. Set false to redact it (some deployments treat system prompts as commercial secrets)."
           }
         }
       }

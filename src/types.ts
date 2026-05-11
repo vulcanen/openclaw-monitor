@@ -119,10 +119,10 @@ export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   ui: { enabled: true },
   stream: { maxSubscribers: 16, heartbeatMs: 15_000 },
   audit: {
-    enabled: false,
+    enabled: true,
     contentMaxBytes: 16384,
     retainDays: 3,
-    captureSystemPrompt: false,
+    captureSystemPrompt: true,
   },
 };
 
