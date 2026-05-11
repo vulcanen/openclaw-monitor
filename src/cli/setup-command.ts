@@ -58,11 +58,11 @@ async function runSetup(params: SetupParams): Promise<void> {
   const willAddAllow = !beforeAllow.includes(PLUGIN_ID);
   const willSetConv =
     audit && beforeEntry.hooks?.allowConversationAccess !== true;
-  const willEnableAudit = audit && beforeEntry.audit?.enabled !== true;
+  const willEnableAudit = audit && beforeEntry.config?.audit?.enabled !== true;
 
   if (!willAddAllow && !willSetConv && !willEnableAudit) {
     logger.info?.(
-      `[${PLUGIN_ID}] setup: nothing to do (allow=${beforeAllow.includes(PLUGIN_ID)}, audit.enabled=${beforeEntry.audit?.enabled === true}, allowConversationAccess=${beforeEntry.hooks?.allowConversationAccess === true})`,
+      `[${PLUGIN_ID}] setup: nothing to do (allow=${beforeAllow.includes(PLUGIN_ID)}, audit.enabled=${beforeEntry.config?.audit?.enabled === true}, allowConversationAccess=${beforeEntry.hooks?.allowConversationAccess === true})`,
     );
     return;
   }
@@ -73,7 +73,7 @@ async function runSetup(params: SetupParams): Promise<void> {
       reason: `${PLUGIN_ID} setup applied: ${[
         willAddAllow && "plugins.allow",
         willSetConv && "hooks.allowConversationAccess",
-        willEnableAudit && "audit.enabled",
+        willEnableAudit && "config.audit.enabled",
       ]
         .filter(Boolean)
         .join(" + ")}`,
@@ -87,9 +87,12 @@ async function runSetup(params: SetupParams): Promise<void> {
       const entries = ensureRecord(plugins, "entries") as Record<string, unknown>;
       const entry = ensureRecord(entries, PLUGIN_ID) as Record<string, unknown>;
       if (audit) {
+        // host-level hook gate
         const hooks = ensureRecord(entry, "hooks") as Record<string, unknown>;
         hooks["allowConversationAccess"] = true;
-        const auditCfg = ensureRecord(entry, "audit") as Record<string, unknown>;
+        // plugin's own configSchema-driven data nests under .config
+        const pluginCfg = ensureRecord(entry, "config") as Record<string, unknown>;
+        const auditCfg = ensureRecord(pluginCfg, "audit") as Record<string, unknown>;
         auditCfg["enabled"] = true;
       }
     },
@@ -99,7 +102,7 @@ async function runSetup(params: SetupParams): Promise<void> {
     `[${PLUGIN_ID}] setup wrote: ${[
       willAddAllow && "plugins.allow += openclaw-monitor",
       willSetConv && "plugins.entries.openclaw-monitor.hooks.allowConversationAccess = true",
-      willEnableAudit && "plugins.entries.openclaw-monitor.audit.enabled = true",
+      willEnableAudit && "plugins.entries.openclaw-monitor.config.audit.enabled = true",
     ]
       .filter(Boolean)
       .join(", ")}. Run \`openclaw gateway restart\` to apply.`,
@@ -108,7 +111,7 @@ async function runSetup(params: SetupParams): Promise<void> {
 
 type MonitorEntry = {
   hooks?: { allowConversationAccess?: boolean };
-  audit?: { enabled?: boolean };
+  config?: { audit?: { enabled?: boolean } };
 };
 
 function readMonitorEntry(
@@ -128,7 +131,7 @@ function showStatus(params: { api: OpenClawPluginApi; logger: PluginLogger }): v
   const lines = [
     `plugin id: ${PLUGIN_ID}`,
     `plugins.allow includes: ${allow.includes(PLUGIN_ID)}`,
-    `audit.enabled: ${entry.audit?.enabled === true}`,
+    `config.audit.enabled: ${entry.config?.audit?.enabled === true}`,
     `hooks.allowConversationAccess: ${entry.hooks?.allowConversationAccess === true}`,
   ];
   for (const line of lines) {

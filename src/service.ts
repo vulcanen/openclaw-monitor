@@ -59,8 +59,13 @@ function mergeConfig(input?: Partial<MonitorConfig>): MonitorConfig {
 }
 
 function readPluginConfig(ctx: OpenClawPluginServiceContext): Partial<MonitorConfig> {
-  const config = ctx.config as unknown as { plugins?: Record<string, unknown> };
-  const raw = config?.plugins?.[PLUGIN_ID];
+  // OpenClaw host expects plugin-owned config under
+  // `plugins.entries.<id>.config.*`. The .hooks.* sibling is host-level
+  // and isn't part of our schema.
+  const config = ctx.config as unknown as {
+    plugins?: { entries?: Record<string, { config?: unknown }> };
+  };
+  const raw = config?.plugins?.entries?.[PLUGIN_ID]?.config;
   return (raw && typeof raw === "object" ? (raw as Partial<MonitorConfig>) : {}) ?? {};
 }
 

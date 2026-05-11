@@ -262,7 +262,7 @@ describe("conversation probe", () => {
               entries: {
                 "openclaw-monitor": {
                   hooks: { allowConversationAccess: allow },
-                  audit: { enabled: audit },
+                  config: { audit: { enabled: audit } },
                 },
               },
             },

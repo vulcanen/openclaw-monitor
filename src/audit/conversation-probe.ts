@@ -61,11 +61,17 @@ function readHostAuditFlags(api: OpenClawPluginApi): {
         entries?: Record<string, unknown>;
       };
     };
+    // OpenClaw splits per-plugin config into two namespaces under entries.<id>:
+    //   .hooks.*  -> host-level safety gates (e.g. allowConversationAccess)
+    //   .config.* -> plugin's own configSchema data (e.g. audit.enabled)
     const entry = config.plugins?.entries?.[PLUGIN_ID] as
-      | { hooks?: { allowConversationAccess?: boolean }; audit?: { enabled?: boolean } }
+      | {
+          hooks?: { allowConversationAccess?: boolean };
+          config?: { audit?: { enabled?: boolean } };
+        }
       | undefined;
     return {
-      auditEnabled: entry?.audit?.enabled === true,
+      auditEnabled: entry?.config?.audit?.enabled === true,
       allowConversationAccess: entry?.hooks?.allowConversationAccess === true,
     };
   } catch {
