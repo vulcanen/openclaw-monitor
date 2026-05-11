@@ -1,6 +1,6 @@
 {
   "name": "@vulcanen/openclaw-monitor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Self-contained real-time monitoring console for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",

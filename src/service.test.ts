@@ -319,6 +319,62 @@ describe("hook metrics probe", () => {
     expect(row?.total).toBe(1); // not 2
   });
 
+  it("hook synthesis works even though onDiagnosticEvent never sees Pi-emitted model.call events", async () => {
+    // This test documents the architectural fact that OpenClaw's
+    // onDiagnosticEvent listener filters out all `metadata.trusted` events
+    // (diagnostic-events.ts:803-810). Pi runtime emits model.call.* via
+    // emitTrustedDiagnosticEvent, so external plugins NEVER see them on the
+    // diagnostic event bus. Hook-based capture is the only way.
+    const { installHookMetrics } = await import("./probes/hook-metrics.js");
+    const { createEventFanout } = await import("./probes/event-subscriber.js");
+    const buffer = createEventBuffer({ maxPerType: 64 });
+    const aggregator = createAggregator();
+    const runsTracker = createRunsTracker();
+    const bus = createEventBus({ maxListeners: 4 });
+    const storeRef = createStoreRef();
+    const probe = (await import("./audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
+    const handlers: CapturedHandlers = {};
+    installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
+
+    // Simulate Pi runtime: hooks fire, diagnostic event bus stays silent
+    // (because Pi uses emitTrustedDiagnosticEvent which onDiagnosticEvent drops)
+    handlers["agent_turn_prepare"]?.({}, { runId: "pi-run-1", sessionId: "s1", channelId: "ark-hxapi" });
+    handlers["model_call_started"]?.(
+      { runId: "pi-run-1", callId: "pi-call-1", provider: "ark-hxapi", model: "qwen3.5" },
+      { runId: "pi-run-1", channelId: "ark-hxapi" },
+    );
+    handlers["model_call_ended"]?.(
+      {
+        runId: "pi-run-1",
+        callId: "pi-call-1",
+        provider: "ark-hxapi",
+        model: "qwen3.5",
+        durationMs: 540,
+        outcome: "completed",
+      },
+      { runId: "pi-run-1", channelId: "ark-hxapi" },
+    );
+    handlers["agent_end"]?.(
+      { runId: "pi-run-1", messages: [], success: true, durationMs: 600 },
+      { runId: "pi-run-1", channelId: "ark-hxapi" },
+    );
+
+    // Metrics populated even without ANY diagnostic events
+    expect(aggregator.models()[0]?.key).toBe("ark-hxapi/qwen3.5");
+    expect(aggregator.models()[0]?.total).toBe(1);
+    expect(aggregator.windows()["5m"].modelCalls).toBe(1);
+    // Run finalized via synthesized harness.run.completed
+    expect(runsTracker.recent().some((r) => r.runId === "pi-run-1")).toBe(true);
+  });
+
   it("synthesizes tool.execution events from hook", async () => {
     const { installHookMetrics } = await import("./probes/hook-metrics.js");
     const { createEventFanout } = await import("./probes/event-subscriber.js");

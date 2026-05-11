@@ -45,13 +45,37 @@
 | `outlets/` | `rest-routes.ts`、`sse-stream.ts`、`static-ui.ts`、`event-bus.ts` | HTTP handler + SSE 总线 + 静态资源 | 不直接读 host 事件总线 |
 | `ui/` | Vite + React 子项目 | 浏览器端仪表板 | 不绕过 `/api/monitor/*` 直接读 host |
 
+## 关键事实（绕过这些 fact 会浪费几天）
+
+**外部插件能拿到 / 拿不到什么事件**：
+
+| 事件来源 | 通过 `onDiagnosticEvent` 可见？ | 通过 `api.on(hook)` 可见？ |
+|---|---|---|
+| `emitDiagnosticEvent(...)`（非 trusted） | ✅ | n/a |
+| `emitTrustedDiagnosticEvent(...)`（trusted） | ❌ **被过滤** | n/a |
+| `model.call.*` / `harness.run.*` / `tool.execution.*`（trusted） | ❌ | ✅ via `model_call_started/ended` / `before_tool_call/after_tool_call` hook |
+| `log.record` | ❌ 永远不通过 onDiagnosticEvent，要订 logging | n/a |
+| `message.queued` / `message.processed`（非 trusted） | ✅ | 无对应 hook |
+| `session.state` / `queue.lane.*` / `diagnostic.*` | ✅ | n/a |
+
+**OpenClaw 走哪条代码路径取决于 session 类型**（看 Control UI 的 Sessions 页 `type` 字段）：
+
+| Session type / runtime | 触发标准 agent harness？ | model.call hook fire？ | message_received/sending hook fire？ |
+|---|---|---|---|
+| `direct` + `pi` runtime（用户 API 项目） | ✅ via Pi embedded runner | ✅ | ❌ |
+| Control UI 内置聊天 | ❌ | ❌ | ❌ |
+| Channel plugin 入口 | ✅ | ✅ | ✅ |
+| OpenAI compat `/v1/chat/completions` | ✅ via agentCommandFromIngress | ✅ | depends on session type |
+
+**实操结论**：依赖 `onDiagnosticEvent` 是个**死路**。Metrics 必须从 hook 走，事件总线只能拿到运维侧信号（队列 / session 状态 / 内存 / 心跳）。
+
 ## 关键工程决策（不要倒退）
 
 1. **存储用 JSONL，不用 SQLite** —— OpenClaw 安装时强制 `--ignore-scripts`（[已验证](D:/projects/offical-openclaw/openclaw-2026.5.7/src/plugins/install.ts)），better-sqlite3 这类带 native postinstall 的包**装不上**。JSONL append-only + 按日期分文件，零原生依赖、retention 直接 `unlink` 旧文件。
 2. **零运行时 npm 依赖** —— `package.json` 的 `dependencies: {}` 是空的。`openclaw` 是 devDependency（仅取类型，runtime 由 host 注入）。UI 的 React/Recharts 全部打进 `dist/ui/assets/index-*.js` 静态文件。这是为了避免 host 上任何 install-time 的依赖解析失败。
 3. **HashRouter，不是 BrowserRouter** —— 静态 UI handler 不做 SPA fallback，所有客户端路由都在 hash 段（`#/overview`），后端不用感知。
 4. **scope 用 `@vulcanen`，不要用 `@openclaw`** —— [install.ts:189](D:/projects/offical-openclaw/openclaw-2026.5.7/src/plugins/install.ts) 对 `@openclaw/*` 有特殊"trusted official prerelease"路径，会改变版本解析行为。`@vulcanen` 是个人 scope，与 host 无任何特殊耦合。
-5. **公开 SDK 的 `onDiagnosticEvent` 单参** —— listener 签名是 `(evt) => void`，**没有 metadata**。只有 host 内部才有 `onInternalDiagnosticEvent` 的 metadata。任何想看 `trusted` 标记的代码都是错的。
+5. **公开 SDK 的 `onDiagnosticEvent` 单参 + trusted 事件被过滤** —— listener 签名是 `(evt) => void`，**没有 metadata**。更关键的：`onDiagnosticEvent` **故意丢弃所有 trusted 事件 + 所有 log.record**（[diagnostic-events.ts:803-810](D:/projects/offical-openclaw/openclaw-2026.5.7/src/infra/diagnostic-events.ts)）。Pi runtime / agent harness 用 `emitTrustedDiagnosticEvent` 发出 `model.call.*` / `harness.run.*` —— 这些事件**架构上外部插件永远收不到**。**正确做法**：从 plugin hook (`api.on("model_call_started", ...)` 等) 拿，hook 不受这个过滤影响。`src/probes/hook-metrics.ts` 就是为此而生。任何"为什么 onDiagnosticEvent 看不到 model.call 事件"的疑问，答案都是这一条。
 6. **不直接 import `@openclaw/plugin-sdk`** —— 那个包是 host 私有的（`private: true, version: 0.0.0-private`）。外部插件依赖 `openclaw` 主包，从 `openclaw/plugin-sdk/<sub>` 子路径导入。
 7. **HTTP 路由权限分两类**：
    - `/api/monitor/*`（数据接口）：`auth: "gateway"` + `gatewayRuntimeScopeSurface: "trusted-operator"`，**不要降级**。

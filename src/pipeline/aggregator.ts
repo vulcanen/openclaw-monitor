@@ -247,11 +247,15 @@ export function createAggregator(): Aggregator {
     for (let index = recent.length - 1; index >= 0; index -= 1) {
       const point = recent[index];
       if (!point || point.ts < cutoffMs) break;
-      if (point.type.startsWith("model.call.")) {
+      // Only count terminal events to avoid double-counting (started + completed).
+      if (point.type.startsWith("model.call.") && point.type !== "model.call.started") {
         snap.modelCalls += 1;
         if (point.outcome === "error") snap.modelErrors += 1;
       }
-      if (point.type.startsWith("tool.execution.")) {
+      if (
+        point.type.startsWith("tool.execution.") &&
+        point.type !== "tool.execution.started"
+      ) {
         snap.toolExecs += 1;
         if (point.outcome === "error") snap.toolErrors += 1;
         if (point.type === "tool.execution.blocked") snap.toolBlocked += 1;
