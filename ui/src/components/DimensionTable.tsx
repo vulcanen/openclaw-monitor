@@ -1,4 +1,5 @@
 import type { DimensionRow } from "../api.js";
+import { useI18n } from "../i18n/index.js";
 
 type Props = {
   rows: DimensionRow[];
@@ -20,21 +21,22 @@ function fmtPct(num: number, denom: number): string {
 }
 
 export function DimensionTable({ rows, keyLabel, showTokens = false }: Props) {
+  const { t } = useI18n();
   if (rows.length === 0) {
-    return <div className="empty">no data captured yet</div>;
+    return <div className="empty">{t("empty.dataYet")}</div>;
   }
   return (
     <table>
       <thead>
         <tr>
           <th>{keyLabel}</th>
-          <th className="num">total</th>
-          <th className="num">errors</th>
-          <th className="num">err rate</th>
-          <th className="num">p50</th>
-          <th className="num">p95</th>
-          {showTokens ? <th className="num">tokens in</th> : null}
-          {showTokens ? <th className="num">tokens out</th> : null}
+          <th className="num">{t("dim.col.total")}</th>
+          <th className="num">{t("dim.col.errors")}</th>
+          <th className="num">{t("dim.col.errRate")}</th>
+          <th className="num">{t("dim.col.p50")}</th>
+          <th className="num">{t("dim.col.p95")}</th>
+          {showTokens ? <th className="num">{t("dim.col.tokensIn")}</th> : null}
+          {showTokens ? <th className="num">{t("dim.col.tokensOut")}</th> : null}
         </tr>
       </thead>
       <tbody>

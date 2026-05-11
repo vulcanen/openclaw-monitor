@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { onUnauthorized, tokenStore } from "../api.js";
+import { useI18n } from "../i18n/index.js";
 
 export function TokenGate({ children }: { children: ReactNode }) {
+  const { t, locale, setLocale } = useI18n();
   const [hasToken, setHasToken] = useState<boolean>(() => Boolean(tokenStore.get()));
   const [error, setError] = useState<string | null>(null);
 
@@ -9,8 +11,9 @@ export function TokenGate({ children }: { children: ReactNode }) {
     return onUnauthorized(() => {
       tokenStore.clear();
       setHasToken(false);
-      setError("token rejected (401) — please re-enter");
+      setError(t("tokenGate.rejectedError"));
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (hasToken) return <>{children}</>;
@@ -18,15 +21,17 @@ export function TokenGate({ children }: { children: ReactNode }) {
   return (
     <div className="token-gate">
       <div className="token-gate-card">
-        <h1>OpenClaw Monitor</h1>
-        <p className="token-gate-lead">
-          Paste your OpenClaw gateway operator token to access this dashboard. The token is
-          stored only in your browser localStorage and added as <code>Authorization: Bearer …</code>{" "}
-          to every API call from this page.
-        </p>
-        <p className="token-gate-help">
-          Find the token with: <code>openclaw config get gateway.auth.token</code>
-        </p>
+        <div className="token-gate-lang">
+          <button
+            className="lang"
+            onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
+          >
+            {t("action.langSwitch")}
+          </button>
+        </div>
+        <h1>{t("tokenGate.title")}</h1>
+        <p className="token-gate-lead">{t("tokenGate.lead")}</p>
+        <p className="token-gate-help">{t("tokenGate.help")}</p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -34,7 +39,7 @@ export function TokenGate({ children }: { children: ReactNode }) {
             const input = form.elements.namedItem("token") as HTMLInputElement | null;
             const value = input?.value.trim() ?? "";
             if (!value) {
-              setError("token cannot be empty");
+              setError(t("tokenGate.emptyError"));
               return;
             }
             tokenStore.set(value);
@@ -47,11 +52,11 @@ export function TokenGate({ children }: { children: ReactNode }) {
             type="password"
             autoComplete="off"
             autoFocus
-            placeholder="paste gateway token here"
+            placeholder={t("tokenGate.placeholder")}
             spellCheck={false}
           />
           <button type="submit" className="primary">
-            unlock dashboard
+            {t("tokenGate.submit")}
           </button>
         </form>
         {error ? <div className="token-gate-error">{error}</div> : null}

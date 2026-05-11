@@ -2,18 +2,21 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { openEventStream, tokenStore } from "../api.js";
+import { useI18n } from "../i18n/index.js";
+import type { StringKey } from "../i18n/index.js";
 
-const NAV_ITEMS: Array<{ to: string; label: string }> = [
-  { to: "/overview", label: "Overview" },
-  { to: "/channels", label: "Channels" },
-  { to: "/models", label: "Models" },
-  { to: "/tools", label: "Tools" },
-  { to: "/runs", label: "Runs" },
-  { to: "/conversations", label: "Conversations" },
-  { to: "/logs", label: "Logs" },
+const NAV_ITEMS: Array<{ to: string; key: StringKey }> = [
+  { to: "/overview", key: "nav.overview" },
+  { to: "/channels", key: "nav.channels" },
+  { to: "/models", key: "nav.models" },
+  { to: "/tools", key: "nav.tools" },
+  { to: "/runs", key: "nav.runs" },
+  { to: "/conversations", key: "nav.conversations" },
+  { to: "/logs", key: "nav.logs" },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
+  const { t, locale, setLocale } = useI18n();
   const [live, setLive] = useState(false);
   const [eventCount, setEventCount] = useState(0);
 
@@ -47,24 +50,31 @@ export function Layout({ children }: { children: ReactNode }) {
               to={item.to}
               className={({ isActive }) => (isActive ? "active" : "")}
             >
-              {item.label}
+              {t(item.key)}
             </NavLink>
           ))}
         </nav>
         <div className="spacer" />
         <div className={`status ${live ? "live" : ""}`}>
           <span className="dot" />
-          {live ? `live · ${eventCount} events seen` : "idle"}
+          {live ? t("status.live", { count: eventCount }) : t("status.idle")}
         </div>
         <button
+          className="lang"
+          title={locale === "zh" ? "Switch to English" : "切换中文"}
+          onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
+        >
+          {t("action.langSwitch")}
+        </button>
+        <button
           className="logout"
-          title="clear token and re-enter"
+          title={t("action.signOut")}
           onClick={() => {
             tokenStore.clear();
             window.location.reload();
           }}
         >
-          sign out
+          {t("action.signOut")}
         </button>
       </header>
       <main>{children}</main>

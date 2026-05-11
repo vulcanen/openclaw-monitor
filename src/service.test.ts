@@ -430,6 +430,87 @@ describe("conversation probe", () => {
     expect(record?.llmInputs[0]?.truncated).toBe(true);
   });
 
+  it("captures Control-UI style flow via message_received + message_sending alone", async () => {
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    probe.setConfig({
+      enabled: true,
+      contentMaxBytes: 16384,
+      retainDays: 3,
+      captureSystemPrompt: false,
+    });
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers) as never);
+
+    // Simulate a Control UI message: only channel-side message_received/sending fire,
+    // no before_prompt_build / llm_input / agent_end.
+    handlers["message_received"]?.(
+      { from: "user", content: "查一下订单", sessionKey: "s-control-1" },
+      { channelId: "control-ui", sessionKey: "s-control-1" },
+    );
+    handlers["message_sending"]?.(
+      { to: "user", content: "今天有 5 笔订单。" },
+      { channelId: "control-ui", sessionKey: "s-control-1" },
+    );
+
+    const completed = probe.recentCompleted();
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.inbound?.prompt).toBe("查一下订单");
+    const out = completed[0]?.outbound?.messages?.[0] as { content?: string };
+    expect(out?.content).toBe("今天有 5 笔订单。");
+    expect(completed[0]?.llmInputs).toHaveLength(0);
+    expect(completed[0]?.trigger).toBe("channel-message");
+  });
+
+  it("merges message_received with later before_prompt_build/llm_input via sessionKey", async () => {
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    probe.setConfig({
+      enabled: true,
+      contentMaxBytes: 16384,
+      retainDays: 3,
+      captureSystemPrompt: false,
+    });
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers) as never);
+
+    // 1. channel message arrives (only sessionKey, no runId yet)
+    handlers["message_received"]?.(
+      { from: "user", content: "hi", sessionKey: "s-merge-1" },
+      { channelId: "control-ui", sessionKey: "s-merge-1" },
+    );
+    expect(probe.activeCount()).toBe(1);
+
+    // 2. agent harness starts with real runId, same sessionKey
+    handlers["before_prompt_build"]?.(
+      { prompt: "hi", messages: [] },
+      { runId: "real-run-1", sessionKey: "s-merge-1" },
+    );
+    // Should still be 1 record (merged via sessionKey), not 2
+    expect(probe.activeCount()).toBe(1);
+
+    handlers["llm_input"]?.(
+      {
+        runId: "real-run-1",
+        sessionId: "s-merge-1",
+        provider: "openai",
+        model: "gpt-4",
+        prompt: "hi",
+        historyMessages: [],
+        imagesCount: 0,
+      },
+      { runId: "real-run-1", sessionKey: "s-merge-1" },
+    );
+    handlers["agent_end"]?.(
+      { runId: "real-run-1", messages: [], success: true },
+      { runId: "real-run-1", sessionKey: "s-merge-1" },
+    );
+
+    const completed = probe.recentCompleted();
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.llmInputs).toHaveLength(1);
+  });
+
   it("persists a completed conversation to the store", async () => {
     const { createConversationProbe } = await import("./audit/conversation-probe.js");
     const { createConversationStore } = await import("./audit/conversation-store.js");

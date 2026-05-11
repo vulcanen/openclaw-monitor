@@ -36,6 +36,7 @@ export type LlmOutputSegment = {
 export type ConversationRecord = {
   runId: string;
   sessionId?: string;
+  sessionKey?: string;
   agentId?: string;
   channelId?: string;
   trigger?: string;
@@ -64,6 +65,7 @@ export type ConversationRecord = {
 export type ConversationSummary = {
   runId: string;
   sessionId?: string;
+  sessionKey?: string;
   channelId?: string;
   trigger?: string;
   status: ConversationRecord["status"];

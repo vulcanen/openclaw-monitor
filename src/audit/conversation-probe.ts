@@ -41,6 +41,7 @@ type ProbeState = {
   config: AuditConfig;
   store: ConversationStore | undefined;
   active: Map<string, ConversationRecord>;
+  bySessionKey: Map<string, string>;
   recent: ConversationRecord[];
 };
 
@@ -57,9 +58,7 @@ function readHostAuditFlags(api: OpenClawPluginApi): {
 } {
   try {
     const config = api.runtime.config.current() as unknown as {
-      plugins?: {
-        entries?: Record<string, unknown>;
-      };
+      plugins?: { entries?: Record<string, unknown> };
     };
     // OpenClaw splits per-plugin config into two namespaces under entries.<id>:
     //   .hooks.*  -> host-level safety gates (e.g. allowConversationAccess)
@@ -84,30 +83,74 @@ export function createConversationProbe(): ConversationProbe {
     config: DISABLED_CONFIG,
     store: undefined,
     active: new Map(),
+    bySessionKey: new Map(),
     recent: [],
   };
 
-  const ensureRecord = (
-    runId: string | undefined,
+  // Look up an existing record by (sessionKey || runId), or create a new one.
+  // Channel-only flows (message_received without a real harness run) bring
+  // sessionKey but no runId — we mint a synthetic runId and key the record by
+  // sessionKey so a later before_prompt_build with a real runId in the same
+  // session merges into the same record.
+  const findOrCreateRecord = (
+    ids: { runId?: string; sessionKey?: string },
     seed: Partial<ConversationRecord>,
   ): ConversationRecord | undefined => {
-    if (!runId) return undefined;
-    const existing = state.active.get(runId);
-    if (existing) return existing;
+    const { runId, sessionKey } = ids;
+    if (!runId && !sessionKey) return undefined;
+
+    // sessionKey takes precedence (more stable across hook order)
+    if (sessionKey) {
+      const linkedRunId = state.bySessionKey.get(sessionKey);
+      if (linkedRunId) {
+        const linked = state.active.get(linkedRunId);
+        if (linked) return linked;
+      }
+    }
+
+    if (runId) {
+      const byRun = state.active.get(runId);
+      if (byRun) {
+        if (sessionKey && !state.bySessionKey.has(sessionKey)) {
+          state.bySessionKey.set(sessionKey, byRun.runId);
+        }
+        return byRun;
+      }
+    }
+
+    const effectiveRunId =
+      runId ??
+      (sessionKey
+        ? `ctrl_${sessionKey.replace(/[^A-Za-z0-9_-]/gu, "_")}_${Date.now()}`
+        : undefined);
+    if (!effectiveRunId) return undefined;
+
     const fresh: ConversationRecord = {
-      runId,
+      runId: effectiveRunId,
       ...seed,
+      ...(sessionKey ? { sessionKey } : {}),
       status: "active",
       startedAt: seed.startedAt ?? nowIso(),
       llmInputs: [],
       llmOutputs: [],
     };
-    state.active.set(runId, fresh);
+    state.active.set(effectiveRunId, fresh);
+    if (sessionKey) state.bySessionKey.set(sessionKey, effectiveRunId);
     return fresh;
   };
 
-  const finalize = (runId: string, mutate: (rec: ConversationRecord) => void): void => {
-    const record = state.active.get(runId);
+  const finalize = (
+    target: { runId?: string; sessionKey?: string },
+    mutate: (rec: ConversationRecord) => void,
+  ): void => {
+    let record: ConversationRecord | undefined;
+    if (target.sessionKey) {
+      const linkedRunId = state.bySessionKey.get(target.sessionKey);
+      if (linkedRunId) record = state.active.get(linkedRunId);
+    }
+    if (!record && target.runId) {
+      record = state.active.get(target.runId);
+    }
     if (!record) return;
     mutate(record);
     record.endedAt = record.endedAt ?? nowIso();
@@ -118,7 +161,8 @@ export function createConversationProbe(): ConversationProbe {
         record.durationMs = Math.max(0, endMs - startMs);
       }
     }
-    state.active.delete(runId);
+    state.active.delete(record.runId);
+    if (record.sessionKey) state.bySessionKey.delete(record.sessionKey);
     state.recent.push(record);
     if (state.recent.length > MAX_RECENT_COMPLETED) {
       state.recent.shift();
@@ -131,17 +175,19 @@ export function createConversationProbe(): ConversationProbe {
   };
 
   const installHooks: ConversationProbe["installHooks"] = (api) => {
-    // Always register the non-gated hook (records the inbound prompt).
+    // ── Non-gated hooks: register unconditionally (only audit.enabled gates work). ──
+
     api.on("before_prompt_build", (event, ctx) => {
       if (!state.config.enabled) return;
-      const runId = ctx.runId;
-      if (!runId) return;
-      const record = ensureRecord(runId, {
-        ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
-        ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
-        ...(ctx.channelId !== undefined ? { channelId: ctx.channelId } : {}),
-        ...(ctx.trigger !== undefined ? { trigger: ctx.trigger } : {}),
-      });
+      const record = findOrCreateRecord(
+        { ...(ctx.runId !== undefined ? { runId: ctx.runId } : {}), ...(ctx.sessionKey !== undefined ? { sessionKey: ctx.sessionKey } : {}) },
+        {
+          ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
+          ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
+          ...(ctx.channelId !== undefined ? { channelId: ctx.channelId } : {}),
+          ...(ctx.trigger !== undefined ? { trigger: ctx.trigger } : {}),
+        },
+      );
       if (!record) return;
       const promptResult = truncateString(event.prompt, state.config.contentMaxBytes);
       const history = clampArray(event.messages ?? [], MAX_HISTORY_ITEMS);
@@ -154,11 +200,97 @@ export function createConversationProbe(): ConversationProbe {
       };
     });
 
-    // Conditional registration: only when the host explicitly grants
-    // `plugins.entries.openclaw-monitor.hooks.allowConversationAccess` AND
-    // the plugin's own `audit.enabled` is true. Without both, we don't even
-    // attempt to register, which keeps host logs clean instead of emitting
-    // "blocked" notices for every conversation hook.
+    // Channel-side inbound (Control UI, Telegram, Discord, etc.). Fires for
+    // every channel message — even ones that never trigger an agent harness —
+    // so we get visibility for Control UI conversations that don't fire
+    // before_prompt_build / llm_input.
+    api.on("message_received", (event, ctx) => {
+      if (!state.config.enabled) return;
+      const sessionKey = event.sessionKey ?? ctx.sessionKey;
+      const runId = event.runId ?? ctx.runId;
+      if (!sessionKey && !runId) return;
+      const record = findOrCreateRecord(
+        {
+          ...(runId !== undefined ? { runId } : {}),
+          ...(sessionKey !== undefined ? { sessionKey } : {}),
+        },
+        {
+          ...(ctx.channelId !== undefined ? { channelId: ctx.channelId } : {}),
+          trigger: "channel-message",
+        },
+      );
+      if (!record) return;
+      // Only set inbound if a more authoritative source (before_prompt_build)
+      // hasn't already filled it in for this conversation.
+      if (!record.inbound) {
+        const promptResult = truncateString(event.content, state.config.contentMaxBytes);
+        record.inbound = {
+          capturedAt: nowIso(),
+          prompt: promptResult.value ?? "",
+          history: [],
+          historyCount: 0,
+          truncated: promptResult.truncated,
+        };
+      }
+    });
+
+    // Channel-side outbound. Some flows (Control UI without a harness run)
+    // never fire agent_end, so this is the only chance to capture the reply
+    // and finalize the record.
+    api.on("message_sending", (event, ctx) => {
+      if (!state.config.enabled) return;
+      const sessionKey = ctx.sessionKey;
+      const runId = ctx.runId;
+      if (!sessionKey && !runId) return;
+      const lookupSessionKey: string | undefined =
+        sessionKey ??
+        (runId !== undefined
+          ? Array.from(state.bySessionKey.entries()).find(([, r]) => r === runId)?.[0]
+          : undefined);
+      const linkedRunId =
+        (lookupSessionKey !== undefined ? state.bySessionKey.get(lookupSessionKey) : undefined) ??
+        runId;
+      if (!linkedRunId) return;
+      const record = state.active.get(linkedRunId);
+      if (!record) return;
+      // Append the outbound reply but keep the record active — agent_end (if it
+      // fires) will be the authoritative finalize. If agent_end never comes
+      // (channel-only flow), we still close out here.
+      if (!record.outbound) {
+        const contentResult = truncateString(event.content, state.config.contentMaxBytes);
+        record.outbound = {
+          capturedAt: nowIso(),
+          success: true,
+          messages: [
+            {
+              role: "assistant",
+              content: contentResult.value ?? "",
+              to: event.to,
+              ...(event.replyToId !== undefined ? { replyToId: event.replyToId } : {}),
+            },
+          ],
+          truncated: contentResult.truncated,
+        };
+      }
+      // If no LLM hops were captured, this is a pure channel-only flow.
+      // Finalize now because no agent_end is coming.
+      if (record.llmInputs.length === 0 && record.llmOutputs.length === 0) {
+        finalize(
+          {
+            runId: record.runId,
+            ...(record.sessionKey !== undefined ? { sessionKey: record.sessionKey } : {}),
+          },
+          (rec) => {
+            rec.status = "completed";
+          },
+        );
+      }
+    });
+
+    // ── Gated hooks: only register when both audit.enabled AND host's
+    // allowConversationAccess are true. This avoids the "blocked" info log
+    // OpenClaw emits when a non-bundled plugin tries to register these
+    // without the explicit consent gate.
     const { auditEnabled, allowConversationAccess } = readHostAuditFlags(api);
     if (!(auditEnabled && allowConversationAccess)) {
       return;
@@ -167,17 +299,24 @@ export function createConversationProbe(): ConversationProbe {
     api.on("llm_input", (event, ctx) => {
       if (!state.config.enabled) return;
       const runId = event.runId ?? ctx.runId;
+      const sessionKey = event.sessionId ?? ctx.sessionKey;
       if (!runId) return;
-      const record = ensureRecord(runId, {
-        ...(event.sessionId
-          ? { sessionId: event.sessionId }
-          : ctx.sessionId
-            ? { sessionId: ctx.sessionId }
-            : {}),
-        ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
-        ...(ctx.channelId !== undefined ? { channelId: ctx.channelId } : {}),
-        ...(ctx.trigger !== undefined ? { trigger: ctx.trigger } : {}),
-      });
+      const record = findOrCreateRecord(
+        {
+          runId,
+          ...(sessionKey !== undefined ? { sessionKey } : {}),
+        },
+        {
+          ...(event.sessionId
+            ? { sessionId: event.sessionId }
+            : ctx.sessionId
+              ? { sessionId: ctx.sessionId }
+              : {}),
+          ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
+          ...(ctx.channelId !== undefined ? { channelId: ctx.channelId } : {}),
+          ...(ctx.trigger !== undefined ? { trigger: ctx.trigger } : {}),
+        },
+      );
       if (!record) return;
       const promptResult = truncateString(event.prompt, state.config.contentMaxBytes);
       const systemResult = state.config.captureSystemPrompt
@@ -228,17 +367,23 @@ export function createConversationProbe(): ConversationProbe {
       const runId = event.runId ?? ctx.runId;
       if (!runId) return;
       const messages = clampArray(event.messages ?? [], MAX_HISTORY_ITEMS);
-      finalize(runId, (record) => {
-        record.outbound = {
-          capturedAt: nowIso(),
-          success: event.success,
-          messages: messages.items,
-          truncated: messages.truncated,
-        };
-        record.status = event.success ? "completed" : "error";
-        if (event.error) record.errorMessage = event.error;
-        if (typeof event.durationMs === "number") record.durationMs = event.durationMs;
-      });
+      finalize(
+        {
+          runId,
+          ...(ctx.sessionKey !== undefined ? { sessionKey: ctx.sessionKey } : {}),
+        },
+        (record) => {
+          record.outbound = {
+            capturedAt: nowIso(),
+            success: event.success,
+            messages: messages.items,
+            truncated: messages.truncated,
+          };
+          record.status = event.success ? "completed" : "error";
+          if (event.error) record.errorMessage = event.error;
+          if (typeof event.durationMs === "number") record.durationMs = event.durationMs;
+        },
+      );
     });
   };
 
@@ -254,6 +399,7 @@ export function createConversationProbe(): ConversationProbe {
     activeCount: () => state.active.size,
     reset: () => {
       state.active.clear();
+      state.bySessionKey.clear();
       state.recent.length = 0;
     },
   };

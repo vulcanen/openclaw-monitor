@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { App } from "./App.js";
+import { I18nProvider } from "./i18n/index.js";
 import "./styles.css";
 
 // Unregister any service worker whose scope intercepts our path. The Monitor
@@ -35,8 +36,10 @@ if (!rootElement) throw new Error("#root not found");
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <HashRouter>
-      <App />
-    </HashRouter>
+    <I18nProvider>
+      <HashRouter>
+        <App />
+      </HashRouter>
+    </I18nProvider>
   </React.StrictMode>,
 );

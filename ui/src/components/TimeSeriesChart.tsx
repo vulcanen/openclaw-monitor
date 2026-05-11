@@ -9,6 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, type SeriesPoint } from "../api.js";
+import { useI18n } from "../i18n/index.js";
 
 type Props = {
   metric: string;
@@ -17,6 +18,7 @@ type Props = {
 };
 
 export function TimeSeriesChart({ metric, windowSec = 900, height = 200 }: Props) {
+  const { t } = useI18n();
   const [points, setPoints] = useState<SeriesPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,8 +43,9 @@ export function TimeSeriesChart({ metric, windowSec = 900, height = 200 }: Props
     };
   }, [metric, windowSec]);
 
-  if (error) return <div className="error-banner">series load failed: {error}</div>;
-  if (points.length === 0) return <div className="empty">no data yet</div>;
+  if (error)
+    return <div className="error-banner">{t("chart.loadFailed", { error })}</div>;
+  if (points.length === 0) return <div className="empty">{t("chart.noData")}</div>;
 
   const data = points.map((p) => ({
     ts: p.ts,

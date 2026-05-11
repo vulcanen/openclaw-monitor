@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { api } from "../api.js";
 import { usePolling } from "../hooks.js";
+import { useI18n } from "../i18n/index.js";
 
 export function Logs() {
+  const { t } = useI18n();
   const [level, setLevel] = useState("");
   const [component, setComponent] = useState("");
 
@@ -19,38 +21,36 @@ export function Logs() {
 
   return (
     <div>
-      <h2 className="page-title">Logs</h2>
-      <div className="subtitle">
-        redacted log records emitted via the diagnostic event bus · refreshes every 4s
-      </div>
+      <h2 className="page-title">{t("logs.title")}</h2>
+      <div className="subtitle">{t("logs.subtitle")}</div>
 
       <div className="toolbar">
-        <label>level</label>
+        <label>{t("logs.filter.level")}</label>
         <select value={level} onChange={(e) => setLevel(e.target.value)}>
-          <option value="">any</option>
+          <option value="">{t("common.any")}</option>
           <option value="trace">trace</option>
           <option value="debug">debug</option>
           <option value="info">info</option>
           <option value="warn">warn</option>
           <option value="error">error</option>
         </select>
-        <label>component</label>
+        <label>{t("logs.filter.component")}</label>
         <input
           type="text"
           value={component}
           onChange={(e) => setComponent(e.target.value)}
-          placeholder="e.g. gateway"
+          placeholder={t("logs.filter.componentPlaceholder")}
         />
-        <button onClick={refresh}>refresh</button>
+        <button onClick={refresh}>{t("common.refresh")}</button>
       </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
 
       <div className="panel" style={{ padding: 0 }}>
         {!data ? (
-          <div className="empty">loading…</div>
+          <div className="empty">{t("common.loading")}</div>
         ) : data.records.length === 0 ? (
-          <div className="empty">no log records buffered</div>
+          <div className="empty">{t("empty.logs")}</div>
         ) : (
           <div>
             <div
@@ -62,10 +62,10 @@ export function Logs() {
                 fontSize: 11,
               }}
             >
-              <div>time</div>
-              <div>level</div>
-              <div>component</div>
-              <div>message</div>
+              <div>{t("logs.col.time")}</div>
+              <div>{t("logs.col.level")}</div>
+              <div>{t("logs.col.component")}</div>
+              <div>{t("logs.col.message")}</div>
             </div>
             {data.records.map((rec, idx) => (
               <div className="log-row" key={`${rec.capturedAt}-${idx}`}>

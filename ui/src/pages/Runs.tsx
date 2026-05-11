@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type RunSnapshot } from "../api.js";
 import { usePolling } from "../hooks.js";
+import { useI18n } from "../i18n/index.js";
 
 function fmtDuration(ms: number | undefined): string {
   if (ms === undefined) return "—";
@@ -12,31 +13,32 @@ function fmtDuration(ms: number | undefined): string {
   return `${mins}m${secs}s`;
 }
 
-function statusTag(status: RunSnapshot["status"]) {
-  const cls = status === "completed" ? "ok" : status === "active" ? "active" : "error";
-  return <span className={`tag ${cls}`}>{status}</span>;
-}
-
 export function Runs() {
+  const { t } = useI18n();
   const [filter, setFilter] = useState<"" | RunSnapshot["status"]>("");
   const { data, error } = usePolling(() => api.runs(100), 5_000);
+
+  const statusTag = (status: RunSnapshot["status"]) => {
+    const cls = status === "completed" ? "ok" : status === "active" ? "active" : "error";
+    return <span className={`tag ${cls}`}>{t(`runs.status.${status}` as never)}</span>;
+  };
 
   const rows = (data?.runs ?? []).filter((run) => !filter || run.status === filter);
 
   return (
     <div>
-      <h2 className="page-title">Runs</h2>
+      <h2 className="page-title">{t("runs.title")}</h2>
       <div className="subtitle">
-        harness runs · {data?.active ?? 0} active · drill into a run for full event timeline
+        {t("runs.subtitle", { active: data?.active ?? 0 })}
       </div>
 
       <div className="toolbar">
-        <label>status</label>
+        <label>{t("runs.filter.status")}</label>
         <select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
-          <option value="">all</option>
-          <option value="active">active</option>
-          <option value="completed">completed</option>
-          <option value="error">error</option>
+          <option value="">{t("runs.status.all")}</option>
+          <option value="active">{t("runs.status.active")}</option>
+          <option value="completed">{t("runs.status.completed")}</option>
+          <option value="error">{t("runs.status.error")}</option>
         </select>
       </div>
 
@@ -44,18 +46,18 @@ export function Runs() {
 
       <div className="panel">
         {rows.length === 0 ? (
-          <div className="empty">no runs match</div>
+          <div className="empty">{t("empty.runs")}</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>run id</th>
-                <th>status</th>
-                <th>channel</th>
-                <th>started</th>
-                <th>duration</th>
-                <th className="num">model calls</th>
-                <th className="num">tool execs</th>
+                <th>{t("runs.col.runId")}</th>
+                <th>{t("runs.col.status")}</th>
+                <th>{t("runs.col.channel")}</th>
+                <th>{t("runs.col.started")}</th>
+                <th>{t("runs.col.duration")}</th>
+                <th className="num">{t("runs.col.modelCalls")}</th>
+                <th className="num">{t("runs.col.toolExecs")}</th>
               </tr>
             </thead>
             <tbody>

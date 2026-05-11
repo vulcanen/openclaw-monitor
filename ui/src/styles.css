@@ -107,8 +107,9 @@ a:hover {
   box-shadow: 0 0 6px var(--good);
 }
 
-.topbar .logout {
-  margin-left: 16px;
+.topbar .logout,
+.topbar .lang {
+  margin-left: 8px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -119,7 +120,37 @@ a:hover {
   font-family: var(--font);
 }
 
-.topbar .logout:hover {
+.topbar .lang {
+  margin-left: 16px;
+  min-width: 32px;
+  font-weight: 600;
+}
+
+.topbar .logout:hover,
+.topbar .lang:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.token-gate-lang {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.token-gate-lang .lang {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-weight: 600;
+}
+
+.token-gate-lang .lang:hover {
   border-color: var(--accent);
   color: var(--text);
 }

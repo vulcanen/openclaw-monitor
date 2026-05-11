@@ -1,6 +1,8 @@
 import { Link, useParams } from "react-router-dom";
 import { api, type ConversationRecord } from "../api.js";
 import { usePolling } from "../hooks.js";
+import { useI18n } from "../i18n/index.js";
+import type { TranslateFn } from "../i18n/index.js";
 
 function Section({
   title,
@@ -8,12 +10,14 @@ function Section({
   capturedAt,
   truncated,
   children,
+  t,
 }: {
   title: string;
   index: number;
   capturedAt?: string;
   truncated?: boolean;
   children: React.ReactNode;
+  t: TranslateFn;
 }) {
   return (
     <div className="panel" style={{ marginBottom: 16 }}>
@@ -33,7 +37,11 @@ function Section({
             }}
           >
             {new Date(capturedAt).toLocaleTimeString()}
-            {truncated ? <span className="tag warn" style={{ marginLeft: 8 }}>truncated</span> : null}
+            {truncated ? (
+              <span className="tag warn" style={{ marginLeft: 8 }}>
+                {t("common.truncated")}
+              </span>
+            ) : null}
           </span>
         ) : null}
       </h3>
@@ -62,9 +70,21 @@ function MessageBox({ label, content }: { label: string; content?: string }) {
   );
 }
 
-function HistoryView({ messages, count }: { messages: unknown[]; count?: number }) {
+function HistoryView({
+  messages,
+  count,
+  t,
+}: {
+  messages: unknown[];
+  count?: number;
+  t: TranslateFn;
+}) {
   if (!messages || messages.length === 0) {
-    return <div className="empty" style={{ padding: 16 }}>(no history captured)</div>;
+    return (
+      <div className="empty" style={{ padding: 16 }}>
+        {t("empty.history")}
+      </div>
+    );
   }
   return (
     <div>
@@ -75,7 +95,10 @@ function HistoryView({ messages, count }: { messages: unknown[]; count?: number 
           marginBottom: 8,
         }}
       >
-        showing {messages.length} of {count ?? messages.length} messages
+        {t("conversationDetail.label.historyShowing", {
+          shown: messages.length,
+          total: count ?? messages.length,
+        })}
       </div>
       {messages.map((msg, idx) => (
         <pre key={idx} style={{ whiteSpace: "pre-wrap", marginBottom: 6, fontSize: 11 }}>
@@ -86,32 +109,34 @@ function HistoryView({ messages, count }: { messages: unknown[]; count?: number 
   );
 }
 
-function Inbound({ record }: { record: ConversationRecord }) {
+function Inbound({ record, t }: { record: ConversationRecord; t: TranslateFn }) {
   if (!record.inbound) {
     return (
-      <Section title="project → OpenClaw" index={1}>
+      <Section title={t("conversationDetail.section.inbound")} index={1} t={t}>
         <div className="empty" style={{ padding: 16 }}>
-          (no inbound captured · before_prompt_build hook did not fire for this run)
+          {t("conversationDetail.empty.inbound")}
         </div>
       </Section>
     );
   }
   return (
     <Section
-      title="project → OpenClaw"
+      title={t("conversationDetail.section.inbound")}
       index={1}
       capturedAt={record.inbound.capturedAt}
       truncated={record.inbound.truncated}
+      t={t}
     >
-      <MessageBox label="prompt" content={record.inbound.prompt} />
+      <MessageBox label={t("conversationDetail.label.prompt")} content={record.inbound.prompt} />
       <details>
         <summary style={{ cursor: "pointer", color: "var(--accent)", fontSize: 12 }}>
-          session history ({record.inbound.historyCount})
+          {t("conversationDetail.label.history", { count: record.inbound.historyCount })}
         </summary>
         <div style={{ marginTop: 8 }}>
           <HistoryView
             messages={record.inbound.history}
             count={record.inbound.historyCount}
+            t={t}
           />
         </div>
       </details>
@@ -119,16 +144,21 @@ function Inbound({ record }: { record: ConversationRecord }) {
   );
 }
 
-function LlmExchanges({ record }: { record: ConversationRecord }) {
-  const pairs: Array<{ input?: ConversationRecord["llmInputs"][number]; output?: ConversationRecord["llmOutputs"][number] }> = [];
+function LlmExchanges({ record, t }: { record: ConversationRecord; t: TranslateFn }) {
+  const pairs: Array<{
+    input?: ConversationRecord["llmInputs"][number];
+    output?: ConversationRecord["llmOutputs"][number];
+  }> = [];
   const max = Math.max(record.llmInputs.length, record.llmOutputs.length);
   for (let i = 0; i < max; i += 1) {
     pairs.push({ input: record.llmInputs[i], output: record.llmOutputs[i] });
   }
   if (pairs.length === 0) {
     return (
-      <Section title="OpenClaw ↔ LLM" index={2}>
-        <div className="empty" style={{ padding: 16 }}>(no llm_input / llm_output captured)</div>
+      <Section title={t("conversationDetail.section.llmInput")} index={2} t={t}>
+        <div className="empty" style={{ padding: 16 }}>
+          {t("conversationDetail.empty.exchange")}
+        </div>
       </Section>
     );
   }
@@ -137,10 +167,15 @@ function LlmExchanges({ record }: { record: ConversationRecord }) {
       {pairs.map((pair, idx) => (
         <div key={idx} className="grid cols-2" style={{ marginBottom: 16 }}>
           <Section
-            title={pairs.length > 1 ? `OpenClaw → LLM (hop ${idx + 1})` : "OpenClaw → LLM"}
+            title={
+              pairs.length > 1
+                ? t("conversationDetail.section.llmInputHop", { n: idx + 1 })
+                : t("conversationDetail.section.llmInput")
+            }
             index={2}
             capturedAt={pair.input?.capturedAt}
             truncated={pair.input?.truncated}
+            t={t}
           >
             {pair.input ? (
               <>
@@ -154,35 +189,53 @@ function LlmExchanges({ record }: { record: ConversationRecord }) {
                   <span className="tag">{pair.input.provider}</span>{" "}
                   <code>{pair.input.model}</code>
                   {pair.input.imagesCount > 0 ? (
-                    <span style={{ marginLeft: 8 }}>· {pair.input.imagesCount} images</span>
+                    <span style={{ marginLeft: 8 }}>
+                      ·{" "}
+                      {t("conversationDetail.label.images", { count: pair.input.imagesCount })}
+                    </span>
                   ) : null}
                 </div>
                 {pair.input.systemPrompt ? (
-                  <MessageBox label="system" content={pair.input.systemPrompt} />
+                  <MessageBox
+                    label={t("conversationDetail.label.system")}
+                    content={pair.input.systemPrompt}
+                  />
                 ) : null}
-                <MessageBox label="prompt" content={pair.input.prompt} />
+                <MessageBox
+                  label={t("conversationDetail.label.prompt")}
+                  content={pair.input.prompt}
+                />
                 {pair.input.historyMessages.length > 0 ? (
                   <details>
                     <summary
                       style={{ cursor: "pointer", color: "var(--accent)", fontSize: 12 }}
                     >
-                      history ({pair.input.historyMessages.length})
+                      {t("conversationDetail.label.historyShort", {
+                        count: pair.input.historyMessages.length,
+                      })}
                     </summary>
                     <div style={{ marginTop: 8 }}>
-                      <HistoryView messages={pair.input.historyMessages} />
+                      <HistoryView messages={pair.input.historyMessages} t={t} />
                     </div>
                   </details>
                 ) : null}
               </>
             ) : (
-              <div className="empty" style={{ padding: 16 }}>(no input)</div>
+              <div className="empty" style={{ padding: 16 }}>
+                {t("empty.input")}
+              </div>
             )}
           </Section>
           <Section
-            title={pairs.length > 1 ? `LLM → OpenClaw (hop ${idx + 1})` : "LLM → OpenClaw"}
+            title={
+              pairs.length > 1
+                ? t("conversationDetail.section.llmOutputHop", { n: idx + 1 })
+                : t("conversationDetail.section.llmOutput")
+            }
             index={3}
             capturedAt={pair.output?.capturedAt}
             truncated={pair.output?.truncated}
+            t={t}
           >
             {pair.output ? (
               <>
@@ -197,16 +250,26 @@ function LlmExchanges({ record }: { record: ConversationRecord }) {
                   <code>{pair.output.model}</code>
                   {pair.output.usage ? (
                     <span style={{ marginLeft: 8 }}>
-                      · in {pair.output.usage.input ?? 0} / out {pair.output.usage.output ?? 0}
+                      ·{" "}
+                      {t("conversationDetail.label.tokens", {
+                        input: pair.output.usage.input ?? 0,
+                        output: pair.output.usage.output ?? 0,
+                      })}
                     </span>
                   ) : null}
                 </div>
                 {pair.output.assistantTexts.map((text, ti) => (
-                  <MessageBox key={ti} label={`assistant text ${ti + 1}`} content={text} />
+                  <MessageBox
+                    key={ti}
+                    label={t("conversationDetail.label.assistantText", { n: ti + 1 })}
+                    content={text}
+                  />
                 ))}
               </>
             ) : (
-              <div className="empty" style={{ padding: 16 }}>(no output)</div>
+              <div className="empty" style={{ padding: 16 }}>
+                {t("empty.output")}
+              </div>
             )}
           </Section>
         </div>
@@ -215,22 +278,23 @@ function LlmExchanges({ record }: { record: ConversationRecord }) {
   );
 }
 
-function Outbound({ record }: { record: ConversationRecord }) {
+function Outbound({ record, t }: { record: ConversationRecord; t: TranslateFn }) {
   if (!record.outbound) {
     return (
-      <Section title="OpenClaw → project" index={4}>
+      <Section title={t("conversationDetail.section.outbound")} index={4} t={t}>
         <div className="empty" style={{ padding: 16 }}>
-          (no outbound captured · agent_end hook did not fire — likely abort/timeout)
+          {t("conversationDetail.empty.outbound")}
         </div>
       </Section>
     );
   }
   return (
     <Section
-      title="OpenClaw → project"
+      title={t("conversationDetail.section.outbound")}
       index={4}
       capturedAt={record.outbound.capturedAt}
       truncated={record.outbound.truncated}
+      t={t}
     >
       <div
         style={{
@@ -239,7 +303,8 @@ function Outbound({ record }: { record: ConversationRecord }) {
           color: "var(--text-dim)",
         }}
       >
-        success: <span className={record.outbound.success ? "tag ok" : "tag error"}>
+        {t("conversationDetail.row.success")}:{" "}
+        <span className={record.outbound.success ? "tag ok" : "tag error"}>
           {String(record.outbound.success)}
         </span>
         {record.errorMessage ? (
@@ -248,48 +313,50 @@ function Outbound({ record }: { record: ConversationRecord }) {
           </span>
         ) : null}
       </div>
-      <HistoryView messages={record.outbound.messages} />
+      <HistoryView messages={record.outbound.messages} t={t} />
     </Section>
   );
 }
 
 export function ConversationDetail() {
+  const { t } = useI18n();
   const params = useParams();
   const runId = params["runId"] ?? "";
   const { data, error } = usePolling(() => api.conversationDetail(runId), 10_000);
 
   return (
     <div>
-      <Link to="/conversations">← back to conversations</Link>
+      <Link to="/conversations">{t("conversationDetail.backToList")}</Link>
       <h2 className="page-title" style={{ marginTop: 12 }}>
-        conversation <code>{runId}</code>
+        {t("conversationDetail.title", { runId: "" })}
+        <code>{runId}</code>
       </h2>
 
       {error ? <div className="error-banner">{error}</div> : null}
-      {!data ? <div className="empty">loading…</div> : null}
+      {!data ? <div className="empty">{t("common.loading")}</div> : null}
 
       {data ? (
         <>
           <div className="panel" style={{ marginBottom: 16 }}>
-            <h3>summary</h3>
+            <h3>{t("conversationDetail.summary")}</h3>
             <table>
               <tbody>
                 <tr>
-                  <td>status</td>
+                  <td>{t("conversationDetail.row.status")}</td>
                   <td>{data.conversation.status}</td>
                 </tr>
                 <tr>
-                  <td>channel / trigger</td>
+                  <td>{t("conversationDetail.row.channelTrigger")}</td>
                   <td>
                     {data.conversation.trigger ?? data.conversation.channelId ?? "—"}
                   </td>
                 </tr>
                 <tr>
-                  <td>started</td>
+                  <td>{t("conversationDetail.row.started")}</td>
                   <td>{new Date(data.conversation.startedAt).toLocaleString()}</td>
                 </tr>
                 <tr>
-                  <td>ended</td>
+                  <td>{t("conversationDetail.row.ended")}</td>
                   <td>
                     {data.conversation.endedAt
                       ? new Date(data.conversation.endedAt).toLocaleString()
@@ -297,20 +364,20 @@ export function ConversationDetail() {
                   </td>
                 </tr>
                 <tr>
-                  <td>duration ms</td>
+                  <td>{t("conversationDetail.row.durationMs")}</td>
                   <td>{data.conversation.durationMs ?? "—"}</td>
                 </tr>
                 <tr>
-                  <td>llm hops</td>
+                  <td>{t("conversationDetail.row.llmHops")}</td>
                   <td>{data.conversation.llmInputs.length}</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <Inbound record={data.conversation} />
-          <LlmExchanges record={data.conversation} />
-          <Outbound record={data.conversation} />
+          <Inbound record={data.conversation} t={t} />
+          <LlmExchanges record={data.conversation} t={t} />
+          <Outbound record={data.conversation} t={t} />
         </>
       ) : null}
     </div>

@@ -2,6 +2,7 @@ import { api } from "../api.js";
 import { StatCard } from "../components/StatCard.js";
 import { TimeSeriesChart } from "../components/TimeSeriesChart.js";
 import { usePolling } from "../hooks.js";
+import { useI18n } from "../i18n/index.js";
 
 function fmtMs(value: number | null): string {
   if (value === null) return "—";
@@ -15,65 +16,72 @@ function pct(num: number, denom: number): string {
 }
 
 export function Overview() {
+  const { t } = useI18n();
   const { data, error } = usePolling(api.overview, 5_000);
 
-  if (error) return <div className="error-banner">overview load failed: {error}</div>;
-  if (!data) return <div className="empty">loading…</div>;
+  if (error)
+    return <div className="error-banner">{t("overview.loadFailed", { error })}</div>;
+  if (!data) return <div className="empty">{t("common.loading")}</div>;
 
   const fiveMin = data.windows["5m"];
   const oneMin = data.windows["1m"];
 
   return (
     <div>
-      <h2 className="page-title">Overview</h2>
+      <h2 className="page-title">{t("overview.title")}</h2>
       <div className="subtitle">
-        snapshot generated {new Date(data.generatedAt).toLocaleTimeString()} ·{" "}
-        {data.bufferedEvents} events buffered
+        {t("overview.subtitle", {
+          time: new Date(data.generatedAt).toLocaleTimeString(),
+          bufferedEvents: data.bufferedEvents,
+        })}
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
         <StatCard
-          label="model calls (1m)"
+          label={t("stat.modelCalls1m")}
           value={oneMin.modelCalls}
-          delta={`${oneMin.modelErrors} errors`}
+          delta={t("stat.errors", { count: oneMin.modelErrors })}
           tone={oneMin.modelErrors > 0 ? "bad" : "neutral"}
         />
         <StatCard
-          label="error rate (5m)"
+          label={t("stat.errorRate5m")}
           value={pct(fiveMin.modelErrors, fiveMin.modelCalls)}
-          delta={`${fiveMin.modelErrors}/${fiveMin.modelCalls}`}
+          delta={t("stat.errorRateDetail", {
+            errors: fiveMin.modelErrors,
+            total: fiveMin.modelCalls,
+          })}
           tone={fiveMin.modelErrors > 0 ? "bad" : "good"}
         />
         <StatCard
-          label="model p95 (5m)"
+          label={t("stat.modelP955m")}
           value={fmtMs(fiveMin.modelP95Ms)}
-          delta="latency"
+          delta={t("stat.latency")}
           tone="neutral"
         />
         <StatCard
-          label="session alerts (15m)"
+          label={t("stat.sessionAlerts15m")}
           value={data.windows["15m"].sessionsAlerted}
-          delta="stalled / stuck"
+          delta={t("stat.stalledStuck")}
           tone={data.windows["15m"].sessionsAlerted > 0 ? "warn" : "good"}
         />
       </div>
 
       <div className="grid cols-2" style={{ marginBottom: 16 }}>
         <div className="panel">
-          <h3>events / 10s · last 15m</h3>
+          <h3>{t("chart.eventsLast15m")}</h3>
           <TimeSeriesChart metric="events.total" windowSec={900} />
         </div>
         <div className="panel">
-          <h3>model calls / 10s · last 15m</h3>
+          <h3>{t("chart.modelCallsLast15m")}</h3>
           <TimeSeriesChart metric="model.calls" windowSec={900} />
         </div>
       </div>
 
       <div className="grid cols-2">
         <div className="panel">
-          <h3>recent errors</h3>
+          <h3>{t("overview.recentErrors")}</h3>
           {data.recentErrors.length === 0 ? (
-            <div className="empty">no errors recorded</div>
+            <div className="empty">{t("empty.errors")}</div>
           ) : (
             <div className="errors-list">
               {data.recentErrors.map((err, idx) => (
@@ -89,12 +97,12 @@ export function Overview() {
           )}
         </div>
         <div className="panel">
-          <h3>events by type · live counts</h3>
+          <h3>{t("overview.countsByType")}</h3>
           <table>
             <thead>
               <tr>
-                <th>type</th>
-                <th className="num">count</th>
+                <th>{t("overview.col.type")}</th>
+                <th className="num">{t("overview.col.count")}</th>
               </tr>
             </thead>
             <tbody>

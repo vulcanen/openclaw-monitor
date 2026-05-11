@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { api, type ConversationSummary } from "../api.js";
 import { usePolling } from "../hooks.js";
+import { useI18n } from "../i18n/index.js";
 
 function fmtDuration(ms: number | undefined): string {
   if (ms === undefined) return "—";
@@ -11,20 +12,20 @@ function fmtDuration(ms: number | undefined): string {
   return `${mins}m${secs}s`;
 }
 
-function statusTag(status: ConversationSummary["status"]) {
-  const cls = status === "completed" ? "ok" : status === "active" ? "active" : "error";
-  return <span className={`tag ${cls}`}>{status}</span>;
-}
-
 export function Conversations() {
+  const { t } = useI18n();
   const { data, error } = usePolling(() => api.conversations(100), 5_000);
+
+  const statusTag = (status: ConversationSummary["status"]) => {
+    const cls = status === "completed" ? "ok" : status === "active" ? "active" : "error";
+    return <span className={`tag ${cls}`}>{t(`runs.status.${status}` as never)}</span>;
+  };
 
   return (
     <div>
-      <h2 className="page-title">Conversations</h2>
+      <h2 className="page-title">{t("conversations.title")}</h2>
       <div className="subtitle">
-        full content audit · {data?.active ?? 0} in flight · click a runId to drill into the four
-        touchpoints (project → OpenClaw → LLM → OpenClaw → project)
+        {t("conversations.subtitle", { active: data?.active ?? 0 })}
       </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
@@ -32,17 +33,9 @@ export function Conversations() {
       {data && data.conversations.length === 0 ? (
         <div className="panel">
           <div className="empty">
-            <div style={{ marginBottom: 12, fontSize: 14 }}>
-              no conversations captured yet
-            </div>
+            <div style={{ marginBottom: 12, fontSize: 14 }}>{t("conversations.empty")}</div>
             <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-              audit is opt-in. add this to your OpenClaw config to enable:
-              <pre style={{ display: "inline-block", textAlign: "left", marginTop: 8 }}>
-{`plugins:
-  openclaw-monitor:
-    audit:
-      enabled: true`}
-              </pre>
+              {t("conversations.optInHint")}
             </div>
           </div>
         </div>
@@ -53,15 +46,15 @@ export function Conversations() {
           <table>
             <thead>
               <tr>
-                <th>run id</th>
-                <th>status</th>
-                <th>channel</th>
-                <th>started</th>
-                <th>duration</th>
-                <th className="num">hops</th>
-                <th className="num">tokens in</th>
-                <th className="num">tokens out</th>
-                <th>preview</th>
+                <th>{t("conversations.col.runId")}</th>
+                <th>{t("conversations.col.status")}</th>
+                <th>{t("conversations.col.channel")}</th>
+                <th>{t("conversations.col.started")}</th>
+                <th>{t("conversations.col.duration")}</th>
+                <th className="num">{t("conversations.col.hops")}</th>
+                <th className="num">{t("conversations.col.tokensIn")}</th>
+                <th className="num">{t("conversations.col.tokensOut")}</th>
+                <th>{t("conversations.col.preview")}</th>
               </tr>
             </thead>
             <tbody>

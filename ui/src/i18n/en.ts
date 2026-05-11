@@ -1,0 +1,196 @@
+import type { Strings } from "./zh.js";
+
+export const en: Strings = {
+  // Navigation
+  "nav.overview": "Overview",
+  "nav.channels": "Channels",
+  "nav.models": "Models",
+  "nav.tools": "Tools",
+  "nav.runs": "Runs",
+  "nav.conversations": "Conversations",
+  "nav.logs": "Logs",
+
+  // Top bar status / actions
+  "status.idle": "idle",
+  "status.live": "live · {count} events seen",
+  "action.signOut": "sign out",
+  "action.langSwitch": "中",
+
+  // Token gate
+  "tokenGate.title": "OpenClaw Monitor",
+  "tokenGate.lead":
+    "Paste your OpenClaw gateway operator token to access this dashboard. The token is stored only in your browser localStorage and added as Authorization: Bearer … to every API call from this page.",
+  "tokenGate.help": "Find the token with: `openclaw config get gateway.auth.token`",
+  "tokenGate.placeholder": "paste gateway token here",
+  "tokenGate.submit": "unlock dashboard",
+  "tokenGate.emptyError": "token cannot be empty",
+  "tokenGate.rejectedError": "token rejected (401) — please re-enter",
+
+  // Common
+  "common.loading": "loading…",
+  "common.noData": "no data",
+  "common.refresh": "refresh",
+  "common.any": "any",
+  "common.back": "← back",
+  "common.truncated": "truncated",
+  "common.preview": "preview",
+
+  // Empty / error states
+  "empty.errors": "no errors recorded",
+  "empty.dataYet": "no data captured yet",
+  "empty.logs": "no log records buffered",
+  "empty.runs": "no runs match",
+  "empty.history": "(no history captured)",
+  "empty.input": "(no input)",
+  "empty.output": "(no output)",
+
+  // Stat & chart labels
+  "stat.modelCalls1m": "model calls (1m)",
+  "stat.errorRate5m": "error rate (5m)",
+  "stat.modelP955m": "model p95 (5m)",
+  "stat.sessionAlerts15m": "session alerts (15m)",
+  "stat.errors": "{count} errors",
+  "stat.errorRateDetail": "{errors}/{total}",
+  "stat.latency": "latency",
+  "stat.stalledStuck": "stalled / stuck",
+  "chart.eventsLast15m": "events / 10s · last 15m",
+  "chart.modelCallsLast15m": "model calls / 10s · last 15m",
+  "chart.modelErrorsLast15m": "model errors / 10s · last 15m",
+  "chart.toolExecsLast15m": "tool execs / 10s · last 15m",
+  "chart.toolErrorsLast15m": "tool errors + blocks / 10s · last 15m",
+  "chart.messagesLast15m": "messages delivered / 10s · last 15m",
+  "chart.loadFailed": "series load failed: {error}",
+
+  // Overview
+  "overview.title": "Overview",
+  "overview.subtitle": "snapshot generated {time} · {bufferedEvents} events buffered",
+  "overview.recentErrors": "recent errors",
+  "overview.countsByType": "events by type · live counts",
+  "overview.loadFailed": "overview load failed: {error}",
+  "overview.col.type": "type",
+  "overview.col.count": "count",
+
+  // Channels
+  "channels.title": "Channels",
+  "channels.subtitle": "message delivery health by channel",
+  "channels.rollup": "per-channel rollup",
+
+  // Models
+  "models.title": "Models",
+  "models.subtitle": "model call breakdown by provider × model",
+  "models.rollup": "per-model rollup",
+
+  // Tools
+  "tools.title": "Tools",
+  "tools.subtitle": "tool execution top-N + blocked / errored counts",
+  "tools.rollup": "per-tool rollup",
+
+  // Runs list
+  "runs.title": "Runs",
+  "runs.subtitle":
+    "harness runs · {active} active · drill into a run for full event timeline",
+  "runs.filter.status": "status",
+  "runs.status.all": "all",
+  "runs.status.active": "active",
+  "runs.status.completed": "completed",
+  "runs.status.error": "error",
+  "runs.col.runId": "run id",
+  "runs.col.status": "status",
+  "runs.col.channel": "channel",
+  "runs.col.started": "started",
+  "runs.col.duration": "duration",
+  "runs.col.modelCalls": "model calls",
+  "runs.col.toolExecs": "tool execs",
+
+  // Run detail
+  "runDetail.title": "run {runId}",
+  "runDetail.summary": "summary",
+  "runDetail.trace": "event trace ({count})",
+  "runDetail.empty":
+    "no events still buffered for this run · try drilling soon after run completion",
+  "runDetail.row.status": "status",
+  "runDetail.row.channel": "channel",
+  "runDetail.row.session": "session",
+  "runDetail.row.started": "started",
+  "runDetail.row.ended": "ended",
+  "runDetail.row.durationMs": "duration ms",
+  "runDetail.row.modelCalls": "model calls",
+  "runDetail.row.toolExecs": "tool execs",
+  "runDetail.row.error": "error",
+  "runDetail.col.time": "time",
+  "runDetail.col.type": "type",
+  "runDetail.col.payload": "payload",
+  "runDetail.backToRuns": "← back to runs",
+
+  // Dimension table
+  "dim.col.total": "total",
+  "dim.col.errors": "errors",
+  "dim.col.errRate": "err rate",
+  "dim.col.p50": "p50",
+  "dim.col.p95": "p95",
+  "dim.col.tokensIn": "tokens in",
+  "dim.col.tokensOut": "tokens out",
+
+  // Logs
+  "logs.title": "Logs",
+  "logs.subtitle":
+    "redacted log records emitted via the diagnostic event bus · refreshes every 4s",
+  "logs.filter.level": "level",
+  "logs.filter.component": "component",
+  "logs.filter.componentPlaceholder": "e.g. gateway",
+  "logs.col.time": "time",
+  "logs.col.level": "level",
+  "logs.col.component": "component",
+  "logs.col.message": "message",
+
+  // Conversations list (M5)
+  "conversations.title": "Conversations",
+  "conversations.subtitle":
+    "full content audit · {active} in flight · click a runId to drill into the four touchpoints (project → OpenClaw → LLM → OpenClaw → project)",
+  "conversations.empty": "no conversations captured yet",
+  "conversations.optInHint":
+    "Audit is opt-in. Run `openclaw monitor setup --audit` on the gateway host then restart gateway.",
+  "conversations.col.runId": "run id",
+  "conversations.col.status": "status",
+  "conversations.col.channel": "channel",
+  "conversations.col.started": "started",
+  "conversations.col.duration": "duration",
+  "conversations.col.hops": "hops",
+  "conversations.col.tokensIn": "tokens in",
+  "conversations.col.tokensOut": "tokens out",
+  "conversations.col.preview": "preview",
+
+  // Conversation detail (M5)
+  "conversationDetail.title": "conversation {runId}",
+  "conversationDetail.backToList": "← back to conversations",
+  "conversationDetail.summary": "summary",
+  "conversationDetail.row.status": "status",
+  "conversationDetail.row.channelTrigger": "channel / trigger",
+  "conversationDetail.row.started": "started",
+  "conversationDetail.row.ended": "ended",
+  "conversationDetail.row.durationMs": "duration ms",
+  "conversationDetail.row.llmHops": "llm hops",
+  "conversationDetail.section.inbound": "① project → OpenClaw",
+  "conversationDetail.section.llmInput": "② OpenClaw → LLM",
+  "conversationDetail.section.llmInputHop": "② OpenClaw → LLM (hop {n})",
+  "conversationDetail.section.llmOutput": "③ LLM → OpenClaw",
+  "conversationDetail.section.llmOutputHop": "③ LLM → OpenClaw (hop {n})",
+  "conversationDetail.section.outbound": "④ OpenClaw → project",
+  "conversationDetail.label.prompt": "prompt",
+  "conversationDetail.label.system": "system",
+  "conversationDetail.label.history": "session history ({count})",
+  "conversationDetail.label.historyShort": "history ({count})",
+  "conversationDetail.label.historyShowing": "showing {shown} of {total} messages",
+  "conversationDetail.label.assistantText": "assistant text {n}",
+  "conversationDetail.label.images": "{count} images",
+  "conversationDetail.label.tokens": "in {input} / out {output}",
+  "conversationDetail.empty.inbound":
+    "(no inbound captured · before_prompt_build hook did not fire for this run)",
+  "conversationDetail.empty.exchange": "(no llm_input / llm_output captured)",
+  "conversationDetail.empty.outbound":
+    "(no outbound captured · agent_end hook did not fire — likely abort/timeout)",
+  "conversationDetail.row.success": "success",
+
+  // Time series chart
+  "chart.noData": "no data yet",
+};
