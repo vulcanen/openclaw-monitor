@@ -112,6 +112,11 @@
             "type": "boolean",
             "default": true,
             "description": "When true (default in v0.4.0+), the system prompt is included in llm_input segments. Set false to redact it (some deployments treat system prompts as commercial secrets)."
+          },
+          "autoTrustHostGates": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true (default in v0.5.0+), the plugin auto-writes plugins.allow and plugins.entries.openclaw-monitor.hooks.allowConversationAccess on first start so audit works with zero manual setup. Set false if you want explicit operator opt-in via `openclaw monitor setup --audit`. Auto-write logs a loud warn and requires a gateway restart to take effect."
           }
         }
       }

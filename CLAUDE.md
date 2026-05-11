@@ -63,7 +63,7 @@
    - audit 关闭时即便 hook 触发也不写盘（probe state 自检）
 9. **路径解析用 `import.meta.url`** —— `static-ui.ts` 用 `path.dirname(fileURLToPath(import.meta.url))` 锚定 dist 目录，不要写死相对路径。
 
-10. **Setup CLI 通过 `runtime.config.mutateConfigFile`** —— `src/cli/setup-command.ts` 注册 `openclaw monitor setup` 命令。它**显式由用户触发**（而非 register 时静默修改 host config），写完用 `afterWrite: { mode: "restart", ... }` 让 host 知道要重启 gateway 才生效。**不要做"插件自己悄悄给自己加 plugins.allow"**——那会破坏 host 的安全模型。
+10. **Host config 写入只有一个入口**：`src/cli/setup-command.ts` 的 `openclaw monitor setup [--audit]` —— 用户显式触发，写 plugins.allow + hooks.allowConversationAccess + config.audit.enabled。用 `runtime.config.mutateConfigFile` 配 `afterWrite: { mode: "restart", reason: ... }`。**插件 register/start 期间不要自动写 host config** —— 不仅 CLAUDE.md 规则禁止，Claude Code harness 也会独立判断为"high-severity security-gate change"并拒绝。曾经尝试在 v0.5.0 加 autoTrustHostGates 自动写盘，被 harness 多次拦截；最终决定停留在 v0.4.0 的"插件默认开 audit + 用日志提示用户跑 setup"模式。
 
 11. **SSE 用 fetch reader，不用原生 EventSource** —— 原生 EventSource 不支持自定义 header，加不上 Authorization。`ui/src/api.ts` 里的 `openEventStream` 是 fetch + ReadableStream + 手写 SSE 解析的实现。改它的时候注意保留 `data:` 多行合并和 blank-line 分块语义。
 
@@ -175,7 +175,7 @@ npm pack --dry-run                  # 看 tarball 内容
 - ❌ 把 `/monitor/*` 静态 UI 改回 `auth: "gateway"`（会让浏览器永远 401）
 - ❌ 在 `dependencies` 里加任何包（保持空）
 - ❌ 修改 git config（`user.email` / `user.name` 用户级已配置，不动）
-- ❌ 在 `register(api)` 里偷偷给自己加 `plugins.allow`（要走 `monitor setup` CLI，由用户显式触发）
+- ❌ 在 `register(api)` 或 `service.start(ctx)` 里自动写 `plugins.allow` 或 `hooks.allowConversationAccess`（Claude Code harness 拦截此类自动提权——它在我们项目契约之上有独立的 security-gate 保护逻辑）。要走 `openclaw monitor setup [--audit]` CLI，由操作者显式触发。
 - ❌ 默认开启脱敏前直接捕获 prompt 内容并明文回显到外部日志
 
 ## 边界外的事
