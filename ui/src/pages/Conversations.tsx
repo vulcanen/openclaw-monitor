@@ -34,7 +34,10 @@ export function Conversations() {
         <div className="panel">
           <div className="empty">
             <div style={{ marginBottom: 12, fontSize: 14 }}>{t("conversations.empty")}</div>
-            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 8 }}>
+              {t("conversations.emptyHint")}
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.6, color: "var(--text-dim)" }}>
               {t("conversations.optInHint")}
             </div>
           </div>

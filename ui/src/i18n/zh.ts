@@ -143,8 +143,10 @@ export const zh = {
   "conversations.subtitle":
     "完整对话内容审计 · {active} 个进行中 · 点 runId 查看四段（项目 → OpenClaw → LLM → OpenClaw → 项目）",
   "conversations.empty": "暂未捕获到对话",
+  "conversations.emptyHint":
+    "OpenAI API、channel 插件的对话会带完整 LLM 内容；Control UI 等内部路径只能记录会话维度信息（无原文）。",
   "conversations.optInHint":
-    "审计默认关闭。在 OpenClaw 主机执行 `openclaw monitor setup --audit` 开启后重启 gateway。",
+    "如果还没启用审计：在 OpenClaw 主机执行 `openclaw monitor setup --audit` 然后重启 gateway。",
   "conversations.col.runId": "run id",
   "conversations.col.status": "状态",
   "conversations.col.channel": "通道",

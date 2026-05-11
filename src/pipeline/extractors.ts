@@ -90,6 +90,19 @@ export function isMessageDeliveryEvent(event: DiagnosticEventPayload): boolean {
   return event.type.startsWith("message.delivery.");
 }
 
+// `message.processed` is the generic message-pipeline event emitted for every
+// inbound message regardless of which channel/code-path produced it. This is
+// the only diagnostic event we get for Control UI conversations (which do not
+// fire model.call.* / harness.run.* / message.delivery.*), so we rely on it
+// for Channels rollup and Control-UI-style conversation records.
+export function isMessageProcessedEvent(event: DiagnosticEventPayload): boolean {
+  return event.type === "message.processed";
+}
+
+export function isMessageQueuedEvent(event: DiagnosticEventPayload): boolean {
+  return event.type === "message.queued";
+}
+
 export function isWebhookEvent(event: DiagnosticEventPayload): boolean {
   return event.type.startsWith("webhook.");
 }

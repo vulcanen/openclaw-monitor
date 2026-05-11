@@ -220,13 +220,21 @@ describe("jsonl store", () => {
 });
 
 describe("event fanout", () => {
-  it("propagates an injected event to buffer + aggregator + bus + store", () => {
+  it("propagates an injected event to buffer + aggregator + bus + store", async () => {
     const buffer = createEventBuffer({ maxPerType: 64 });
     const aggregator = createAggregator();
     const runsTracker = createRunsTracker();
     const bus = createEventBus({ maxListeners: 4 });
     const storeRef = createStoreRef();
-    const fanout = createEventFanout({ buffer, bus, storeRef, aggregator, runsTracker });
+    const probe = (await import("./audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
 
     let busHits = 0;
     bus.subscribe(() => {
@@ -460,6 +468,68 @@ describe("conversation probe", () => {
     expect(out?.content).toBe("今天有 5 笔订单。");
     expect(completed[0]?.llmInputs).toHaveLength(0);
     expect(completed[0]?.trigger).toBe("channel-message");
+  });
+
+  it("captures Control-UI-style flow from message.queued + message.processed diagnostic events", async () => {
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    probe.setConfig({
+      enabled: true,
+      contentMaxBytes: 16384,
+      retainDays: 3,
+      captureSystemPrompt: false,
+    });
+    // Diagnostic-event path: no hooks involved — Control UI doesn't fire
+    // message_received/sending nor before_prompt_build.
+    const queued = makeEvent("message.queued", {
+      sessionKey: "ctrl-session-1",
+      channel: "dashboard",
+      source: "control-ui",
+    });
+    const processed = makeEvent("message.processed", {
+      sessionKey: "ctrl-session-1",
+      channel: "dashboard",
+      durationMs: 420,
+      outcome: "completed",
+    });
+    probe.ingestDiagnosticEvent(queued, Date.now());
+    probe.ingestDiagnosticEvent(processed, Date.now() + 420);
+    const completed = probe.recentCompleted();
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.channelId).toBe("dashboard");
+    expect(completed[0]?.trigger).toBe("diag:control-ui");
+    expect(completed[0]?.status).toBe("completed");
+    expect(completed[0]?.durationMs).toBe(420);
+  });
+
+  it("does not duplicate-record sessions that already have a hook-driven conversation", async () => {
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    probe.setConfig({
+      enabled: true,
+      contentMaxBytes: 16384,
+      retainDays: 3,
+      captureSystemPrompt: false,
+    });
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers) as never);
+    // Hook fires first (channel plugin path)
+    handlers["message_received"]?.(
+      { from: "user", content: "hi", sessionKey: "hybrid-1" },
+      { channelId: "telegram", sessionKey: "hybrid-1" },
+    );
+    expect(probe.activeCount()).toBe(1);
+    // Now diagnostic event arrives for the same session — should be ignored
+    probe.ingestDiagnosticEvent(
+      makeEvent("message.queued", {
+        sessionKey: "hybrid-1",
+        channel: "telegram",
+        source: "channel",
+      }),
+      Date.now(),
+    );
+    // Still just one record, not duplicated
+    expect(probe.activeCount()).toBe(1);
   });
 
   it("merges message_received with later before_prompt_build/llm_input via sessionKey", async () => {

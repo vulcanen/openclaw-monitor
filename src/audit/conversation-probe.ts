@@ -1,3 +1,4 @@
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { ConversationStore } from "./conversation-store.js";
 import type {
@@ -30,6 +31,7 @@ function clampArray<T>(items: T[], max: number): { items: T[]; truncated: boolea
 
 export type ConversationProbe = {
   installHooks: (api: OpenClawPluginApi) => void;
+  ingestDiagnosticEvent: (event: DiagnosticEventPayload, capturedAtMs: number) => void;
   setConfig: (config: AuditConfig) => void;
   setStore: (store: ConversationStore | undefined) => void;
   recentCompleted: () => ConversationRecord[];
@@ -387,8 +389,78 @@ export function createConversationProbe(): ConversationProbe {
     });
   };
 
+  // Diagnostic-event fallback for Control UI and other code paths that bypass
+  // the channel hook system. Builds lightweight conversation records from
+  // message.queued (start) + message.processed (finalize). These records do
+  // NOT contain content (no message content in these events) — but they give
+  // operators visibility that a conversation happened on a particular channel.
+  const ingestDiagnosticEvent: ConversationProbe["ingestDiagnosticEvent"] = (
+    event,
+    capturedAtMs,
+  ) => {
+    if (!state.config.enabled) return;
+    if (event.type === "message.queued") {
+      const evt = event as unknown as {
+        sessionKey?: string;
+        sessionId?: string;
+        channel?: string;
+        source?: string;
+      };
+      const sessionKey = evt.sessionKey;
+      if (!sessionKey) return;
+      // If a hook-based path is already tracking this session, don't create a
+      // duplicate record from diagnostic events.
+      if (state.bySessionKey.has(sessionKey)) return;
+      findOrCreateRecord(
+        { sessionKey },
+        {
+          ...(evt.sessionId !== undefined ? { sessionId: evt.sessionId } : {}),
+          ...(evt.channel !== undefined ? { channelId: evt.channel } : {}),
+          trigger: evt.source ? `diag:${evt.source}` : "diag:message",
+          startedAt: new Date(capturedAtMs).toISOString(),
+        },
+      );
+    } else if (event.type === "message.processed") {
+      const evt = event as unknown as {
+        sessionKey?: string;
+        channel?: string;
+        durationMs?: number;
+        outcome?: "completed" | "skipped" | "error";
+        error?: string;
+      };
+      const sessionKey = evt.sessionKey;
+      if (!sessionKey) return;
+      const linkedRunId = state.bySessionKey.get(sessionKey);
+      if (!linkedRunId) return;
+      const record = state.active.get(linkedRunId);
+      if (!record) return;
+      // Only finalize records that came in via diagnostic-event path
+      // (trigger starts with "diag:"). Hook-driven records finalize via
+      // agent_end or message_sending and shouldn't be touched here.
+      if (!record.trigger?.startsWith("diag:")) return;
+      finalize(
+        { runId: record.runId, sessionKey },
+        (rec) => {
+          rec.status = evt.outcome === "error" ? "error" : "completed";
+          if (evt.error) rec.errorMessage = evt.error;
+          if (typeof evt.durationMs === "number") rec.durationMs = evt.durationMs;
+          // No content to record. Mark this record as diagnostic-only so the
+          // UI can render an informative empty state instead of pretending we
+          // missed the content capture.
+          rec.outbound = {
+            capturedAt: nowIso(),
+            success: evt.outcome !== "error",
+            messages: [],
+            truncated: false,
+          };
+        },
+      );
+    }
+  };
+
   return {
     installHooks,
+    ingestDiagnosticEvent,
     setConfig: (config) => {
       state.config = config;
     },

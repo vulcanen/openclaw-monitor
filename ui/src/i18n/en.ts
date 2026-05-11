@@ -148,8 +148,10 @@ export const en: Strings = {
   "conversations.subtitle":
     "full content audit · {active} in flight · click a runId to drill into the four touchpoints (project → OpenClaw → LLM → OpenClaw → project)",
   "conversations.empty": "no conversations captured yet",
+  "conversations.emptyHint":
+    "OpenAI API and channel-plugin conversations carry full LLM content; Control UI and other internal paths can only be tracked at session-level (no body).",
   "conversations.optInHint":
-    "Audit is opt-in. Run `openclaw monitor setup --audit` on the gateway host then restart gateway.",
+    "If audit is not enabled yet: run `openclaw monitor setup --audit` on the gateway host then restart.",
   "conversations.col.runId": "run id",
   "conversations.col.status": "status",
   "conversations.col.channel": "channel",

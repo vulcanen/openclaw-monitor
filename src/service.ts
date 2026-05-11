@@ -109,6 +109,7 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
     storeRef,
     aggregator,
     runsTracker,
+    conversationProbe,
   });
 
   const resolveStorageRoot = (ctx: OpenClawPluginServiceContext): string => {

@@ -9,6 +9,7 @@ import type {
 import {
   extractDimensions,
   isMessageDeliveryEvent,
+  isMessageProcessedEvent,
   isModelCallEvent,
   isToolExecutionEvent,
 } from "./extractors.js";
@@ -154,6 +155,27 @@ export function createAggregator(): Aggregator {
         acc.total += 1;
         if (isError) acc.errors += 1;
         if (typeof dims.durationMs === "number") acc.durations.push(dims.durationMs);
+      }
+    }
+
+    // Fallback: count `message.processed` events for channels that don't
+    // fire message.delivery.* (Control UI, ACP, etc.). These events are
+    // emitted by every inbound message regardless of channel/path.
+    if (isMessageProcessedEvent(event) && dims.channel) {
+      const processedEvent = event as unknown as {
+        outcome?: "completed" | "skipped" | "error";
+        durationMs?: number;
+      };
+      const isMessageError = processedEvent.outcome === "error";
+      if (processedEvent.outcome === "completed") {
+        recordSeries("messages.delivered", capturedAtMs);
+      }
+      if (isMessageError) recordSeries("messages.errors", capturedAtMs);
+      const acc = accFor(channelStats, dims.channel);
+      acc.total += 1;
+      if (isMessageError) acc.errors += 1;
+      if (typeof processedEvent.durationMs === "number") {
+        acc.durations.push(processedEvent.durationMs);
       }
     }
   };

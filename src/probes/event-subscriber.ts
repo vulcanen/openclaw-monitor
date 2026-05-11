@@ -1,5 +1,6 @@
 import { onDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
+import type { ConversationProbe } from "../audit/conversation-probe.js";
 import type { Aggregator } from "../pipeline/aggregator.js";
 import type { RunsTracker } from "../pipeline/runs-tracker.js";
 import type { StoreRef } from "../storage/store-ref.js";
@@ -19,6 +20,7 @@ export type EventFanoutDeps = {
   storeRef: StoreRef;
   aggregator: Aggregator;
   runsTracker: RunsTracker;
+  conversationProbe: ConversationProbe;
 };
 
 export function createEventFanout(deps: EventFanoutDeps): EventFanout {
@@ -44,6 +46,14 @@ export function createEventFanout(deps: EventFanoutDeps): EventFanout {
           // best-effort persistence
         }
       }
+    } catch {
+      // ignore
+    }
+    try {
+      // Diagnostic-event-driven conversation capture for Control UI / ACP /
+      // any path that doesn't fire message_received/sending hooks. The probe
+      // self-gates on audit.enabled.
+      deps.conversationProbe.ingestDiagnosticEvent(event, capturedAt);
     } catch {
       // ignore
     }
