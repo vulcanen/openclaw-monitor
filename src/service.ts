@@ -7,6 +7,7 @@ import type {
 import { createAggregator } from "./pipeline/aggregator.js";
 import { createRunsTracker } from "./pipeline/runs-tracker.js";
 import { createEventFanout } from "./probes/event-subscriber.js";
+import { installHookMetrics } from "./probes/hook-metrics.js";
 import { createEventBus } from "./outlets/event-bus.js";
 import {
   createDimensionHandler,
@@ -348,6 +349,12 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
     routes,
     registerHooks: (api) => {
       conversationProbe.installHooks(api);
+      // Hook-driven metric capture: subscribes to model_call_*, *_tool_call,
+      // agent_turn_prepare, agent_end and synthesizes diagnostic-event-shaped
+      // payloads into the fanout. This makes Models / Tools / Runs pages
+      // populate even when the host's diagnostic event bus is silent for a
+      // particular code path.
+      installHookMetrics({ api, fanout });
     },
   };
 }

@@ -219,6 +219,147 @@ describe("jsonl store", () => {
   });
 });
 
+describe("hook metrics probe", () => {
+  type CapturedHandlers = Record<string, (event: unknown, ctx: unknown) => unknown>;
+  const makeFakeApi = (handlers: CapturedHandlers) => ({
+    on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+      handlers[name] = handler;
+    },
+  });
+
+  it("synthesizes model.call events from hook into aggregator", async () => {
+    const { installHookMetrics } = await import("./probes/hook-metrics.js");
+    const { createEventFanout } = await import("./probes/event-subscriber.js");
+    const buffer = createEventBuffer({ maxPerType: 64 });
+    const aggregator = createAggregator();
+    const runsTracker = createRunsTracker();
+    const bus = createEventBus({ maxListeners: 4 });
+    const storeRef = createStoreRef();
+    const probe = (await import("./audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
+    const handlers: CapturedHandlers = {};
+    installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
+
+    handlers["model_call_started"]?.(
+      { runId: "r1", callId: "c1", provider: "openai", model: "gpt-4" },
+      { channelId: "webchat" },
+    );
+    handlers["model_call_ended"]?.(
+      {
+        runId: "r1",
+        callId: "c1",
+        provider: "openai",
+        model: "gpt-4",
+        durationMs: 220,
+        outcome: "completed",
+      },
+      { channelId: "webchat" },
+    );
+
+    const models = aggregator.models();
+    expect(models[0]?.key).toBe("openai/gpt-4");
+    expect(models[0]?.total).toBe(1);
+    expect(models[0]?.errors).toBe(0);
+    const sources = aggregator.sources();
+    expect(sources.find((s) => s.key === "openai-api")).toBeDefined();
+  });
+
+  it("dedupes when both diagnostic event and hook fire for the same callId", async () => {
+    const { installHookMetrics } = await import("./probes/hook-metrics.js");
+    const { createEventFanout } = await import("./probes/event-subscriber.js");
+    const buffer = createEventBuffer({ maxPerType: 64 });
+    const aggregator = createAggregator();
+    const runsTracker = createRunsTracker();
+    const bus = createEventBus({ maxListeners: 4 });
+    const storeRef = createStoreRef();
+    const probe = (await import("./audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
+    const handlers: CapturedHandlers = {};
+    installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
+
+    // Diagnostic event arrives first
+    fanout.inject(
+      makeEvent("model.call.completed", {
+        runId: "r2",
+        callId: "c2",
+        provider: "anthropic",
+        model: "claude-3",
+        durationMs: 150,
+      }),
+    );
+    // Hook fires after — should be deduped
+    handlers["model_call_ended"]?.(
+      {
+        runId: "r2",
+        callId: "c2",
+        provider: "anthropic",
+        model: "claude-3",
+        durationMs: 150,
+        outcome: "completed",
+      },
+      {},
+    );
+
+    const models = aggregator.models();
+    const row = models.find((m) => m.key === "anthropic/claude-3");
+    expect(row?.total).toBe(1); // not 2
+  });
+
+  it("synthesizes tool.execution events from hook", async () => {
+    const { installHookMetrics } = await import("./probes/hook-metrics.js");
+    const { createEventFanout } = await import("./probes/event-subscriber.js");
+    const buffer = createEventBuffer({ maxPerType: 64 });
+    const aggregator = createAggregator();
+    const runsTracker = createRunsTracker();
+    const bus = createEventBus({ maxListeners: 4 });
+    const storeRef = createStoreRef();
+    const probe = (await import("./audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
+    const handlers: CapturedHandlers = {};
+    installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
+
+    handlers["before_tool_call"]?.(
+      { toolName: "shell", params: {}, runId: "r3", toolCallId: "t1" },
+      {},
+    );
+    handlers["after_tool_call"]?.(
+      {
+        toolName: "shell",
+        params: {},
+        runId: "r3",
+        toolCallId: "t1",
+        durationMs: 18,
+      },
+      {},
+    );
+
+    const tools = aggregator.tools();
+    expect(tools[0]?.key).toBe("shell");
+    expect(tools[0]?.total).toBe(1);
+  });
+});
+
 describe("event fanout", () => {
   it("propagates an injected event to buffer + aggregator + bus + store", async () => {
     const buffer = createEventBuffer({ maxPerType: 64 });

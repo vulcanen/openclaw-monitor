@@ -125,7 +125,9 @@ export function createAggregator(): Aggregator {
 
     recordSeries("events.total", capturedAtMs);
 
-    if (isModelCallEvent(event)) {
+    // Only count the terminal `model.call.{completed,error}` events so a
+    // single call doesn't show up twice (started + completed). Same for tools.
+    if (isModelCallEvent(event) && event.type !== "model.call.started") {
       recordSeries("model.calls", capturedAtMs);
       if (isError) recordSeries("model.errors", capturedAtMs);
       const key = `${dims.provider ?? "unknown"}/${dims.model ?? "unknown"}`;
@@ -137,7 +139,7 @@ export function createAggregator(): Aggregator {
       if (typeof dims.tokensOut === "number") acc.tokensOut += dims.tokensOut;
     }
 
-    if (isToolExecutionEvent(event)) {
+    if (isToolExecutionEvent(event) && event.type !== "tool.execution.started") {
       recordSeries("tool.execs", capturedAtMs);
       if (isError || dims.outcome === "blocked") recordSeries("tool.errors", capturedAtMs);
       if (dims.toolName) {
@@ -189,7 +191,8 @@ export function createAggregator(): Aggregator {
     if (source) {
       const sourceAcc = accFor(sourceStats, source);
       let sourceCounted = false;
-      if (isModelCallEvent(event)) {
+      // Same dedup-by-terminal rule as Models — count once per call, not twice.
+      if (isModelCallEvent(event) && event.type !== "model.call.started") {
         sourceAcc.total += 1;
         sourceCounted = true;
         if (isError) sourceAcc.errors += 1;
