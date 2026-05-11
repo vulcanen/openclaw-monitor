@@ -3,12 +3,26 @@ import type { Strings } from "./zh.js";
 export const en: Strings = {
   // Navigation
   "nav.overview": "Overview",
+  "nav.sources": "Sources",
   "nav.channels": "Channels",
   "nav.models": "Models",
   "nav.tools": "Tools",
   "nav.runs": "Runs",
   "nav.conversations": "Conversations",
   "nav.logs": "Logs",
+
+  // Sources
+  "sources.title": "Sources",
+  "sources.subtitle":
+    "Traffic broken down by entry path (OpenAI API, Control UI, channel plugins)",
+  "sources.rollup": "per-source rollup",
+  "sources.col.source": "source",
+  "sources.legend": "source id key",
+  "sources.legend.id": "id",
+  "sources.legend.meaning": "meaning",
+  "sources.legend.openaiApi": "OpenAI-compatible API (/v1/chat/completions); callers are usually external apps",
+  "sources.legend.controlUi": "OpenClaw built-in Control UI chat",
+  "sources.legend.channelPlugin": "channel plugin entry (telegram / discord / feishu / ...); <name> is the channel id",
 
   // Top bar status / actions
   "status.idle": "idle",
@@ -146,7 +160,7 @@ export const en: Strings = {
   // Conversations list (M5)
   "conversations.title": "Conversations",
   "conversations.subtitle":
-    "full content audit · {active} in flight · click a runId to drill into the four touchpoints (project → OpenClaw → LLM → OpenClaw → project)",
+    "full content audit · {active} in flight · click a runId for details",
   "conversations.empty": "no conversations captured yet",
   "conversations.emptyHint":
     "OpenAI API and channel-plugin conversations carry full LLM content; Control UI and other internal paths can only be tracked at session-level (no body).",

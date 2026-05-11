@@ -8,6 +8,7 @@ import type {
 } from "../types.js";
 import {
   extractDimensions,
+  extractSource,
   isMessageDeliveryEvent,
   isMessageProcessedEvent,
   isModelCallEvent,
@@ -46,6 +47,7 @@ export type Aggregator = {
   channels: () => DimensionRow[];
   models: () => DimensionRow[];
   tools: () => DimensionRow[];
+  sources: () => DimensionRow[];
   series: (params: { metric: SeriesMetric; windowSec: number }) => SeriesResponse;
   reset: () => void;
 };
@@ -72,6 +74,7 @@ export function createAggregator(): Aggregator {
   const channelStats = new Map<string, DimensionAccumulator>();
   const modelStats = new Map<string, DimensionAccumulator>();
   const toolStats = new Map<string, DimensionAccumulator>();
+  const sourceStats = new Map<string, DimensionAccumulator>();
 
   const seriesRings: Record<SeriesMetric, RingPoint[]> = {
     "events.total": [],
@@ -178,6 +181,40 @@ export function createAggregator(): Aggregator {
         acc.durations.push(processedEvent.durationMs);
       }
     }
+
+    // Source rollup: classify any event that carries a channel into an entry
+    // path category (openai-api / control-ui / channel:<name>). Lets the UI
+    // answer "how much of my traffic comes from which entry path".
+    const source = extractSource(dims);
+    if (source) {
+      const sourceAcc = accFor(sourceStats, source);
+      let sourceCounted = false;
+      if (isModelCallEvent(event)) {
+        sourceAcc.total += 1;
+        sourceCounted = true;
+        if (isError) sourceAcc.errors += 1;
+        if (typeof dims.durationMs === "number") sourceAcc.durations.push(dims.durationMs);
+        if (typeof dims.tokensIn === "number") sourceAcc.tokensIn += dims.tokensIn;
+        if (typeof dims.tokensOut === "number") sourceAcc.tokensOut += dims.tokensOut;
+      } else if (isMessageDeliveryEvent(event)) {
+        sourceAcc.total += 1;
+        sourceCounted = true;
+        if (isError) sourceAcc.errors += 1;
+        if (typeof dims.durationMs === "number") sourceAcc.durations.push(dims.durationMs);
+      } else if (isMessageProcessedEvent(event)) {
+        const processedEvent = event as unknown as {
+          outcome?: "completed" | "skipped" | "error";
+          durationMs?: number;
+        };
+        sourceAcc.total += 1;
+        sourceCounted = true;
+        if (processedEvent.outcome === "error") sourceAcc.errors += 1;
+        if (typeof processedEvent.durationMs === "number") {
+          sourceAcc.durations.push(processedEvent.durationMs);
+        }
+      }
+      void sourceCounted;
+    }
   };
 
   const cutoffsFromNow = (now: number) =>
@@ -267,6 +304,7 @@ export function createAggregator(): Aggregator {
   const channels: Aggregator["channels"] = () => dimensionRows(channelStats);
   const models: Aggregator["models"] = () => dimensionRows(modelStats);
   const tools: Aggregator["tools"] = () => dimensionRows(toolStats);
+  const sources: Aggregator["sources"] = () => dimensionRows(sourceStats);
 
   const series: Aggregator["series"] = ({ metric, windowSec }) => {
     const ring = seriesRings[metric];
@@ -290,12 +328,13 @@ export function createAggregator(): Aggregator {
     channelStats.clear();
     modelStats.clear();
     toolStats.clear();
+    sourceStats.clear();
     for (const key of Object.keys(seriesRings) as SeriesMetric[]) {
       seriesRings[key].length = 0;
     }
   };
 
-  return { ingest, windows, channels, models, tools, series, reset };
+  return { ingest, windows, channels, models, tools, sources, series, reset };
 }
 
 function percentile(values: number[], q: number): number {

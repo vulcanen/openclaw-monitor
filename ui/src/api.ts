@@ -209,6 +209,7 @@ export const api = {
   channels: () => getJson<{ rows: DimensionRow[] }>("/channels"),
   models: () => getJson<{ rows: DimensionRow[] }>("/models"),
   tools: () => getJson<{ rows: DimensionRow[] }>("/tools"),
+  sources: () => getJson<{ rows: DimensionRow[] }>("/sources"),
   runs: (limit = 50) =>
     getJson<{ active: number; runs: RunSnapshot[] }>(`/runs?limit=${limit}`),
   runDetail: (runId: string) =>

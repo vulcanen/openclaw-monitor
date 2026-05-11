@@ -262,6 +262,13 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       handler: createDimensionHandler(() => aggregator.tools()),
     },
     {
+      path: "/api/monitor/sources",
+      auth: "gateway",
+      match: "exact",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+      handler: createDimensionHandler(() => aggregator.sources()),
+    },
+    {
       path: "/api/monitor/runs",
       auth: "gateway",
       match: "exact",

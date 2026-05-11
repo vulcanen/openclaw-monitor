@@ -7,6 +7,7 @@ import type { StringKey } from "../i18n/index.js";
 
 const NAV_ITEMS: Array<{ to: string; key: StringKey }> = [
   { to: "/overview", key: "nav.overview" },
+  { to: "/sources", key: "nav.sources" },
   { to: "/channels", key: "nav.channels" },
   { to: "/models", key: "nav.models" },
   { to: "/tools", key: "nav.tools" },

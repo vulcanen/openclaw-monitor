@@ -1,12 +1,25 @@
 export const zh = {
   // Navigation
   "nav.overview": "总览",
+  "nav.sources": "来源",
   "nav.channels": "通道",
   "nav.models": "模型",
   "nav.tools": "工具",
   "nav.runs": "运行",
   "nav.conversations": "对话",
   "nav.logs": "日志",
+
+  // Sources
+  "sources.title": "来源",
+  "sources.subtitle": "按入口路径分类的流量统计（OpenAI API、Control UI、各 channel 插件）",
+  "sources.rollup": "来源维度统计",
+  "sources.col.source": "来源",
+  "sources.legend": "来源标识说明",
+  "sources.legend.id": "标识",
+  "sources.legend.meaning": "含义",
+  "sources.legend.openaiApi": "OpenAI 兼容 API（/v1/chat/completions），调用方多为外部项目",
+  "sources.legend.controlUi": "OpenClaw 内置 Control UI 聊天",
+  "sources.legend.channelPlugin": "channel 插件入口（如 telegram / discord / feishu），<name> 为具体通道名",
 
   // Top bar status / actions
   "status.idle": "空闲",
@@ -141,7 +154,7 @@ export const zh = {
   // Conversations list (M5)
   "conversations.title": "对话审计",
   "conversations.subtitle":
-    "完整对话内容审计 · {active} 个进行中 · 点 runId 查看四段（项目 → OpenClaw → LLM → OpenClaw → 项目）",
+    "完整对话内容审计 · {active} 个进行中 · 点 runId 进入详情",
   "conversations.empty": "暂未捕获到对话",
   "conversations.emptyHint":
     "OpenAI API、channel 插件的对话会带完整 LLM 内容；Control UI 等内部路径只能记录会话维度信息（无原文）。",

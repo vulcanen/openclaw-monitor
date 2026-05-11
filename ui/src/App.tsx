@@ -9,6 +9,7 @@ import { Models } from "./pages/Models.js";
 import { Overview } from "./pages/Overview.js";
 import { RunDetail } from "./pages/RunDetail.js";
 import { Runs } from "./pages/Runs.js";
+import { Sources } from "./pages/Sources.js";
 import { Tools } from "./pages/Tools.js";
 
 export function App() {
@@ -21,6 +22,7 @@ export function App() {
           <Route path="/channels" element={<Channels />} />
           <Route path="/models" element={<Models />} />
           <Route path="/tools" element={<Tools />} />
+          <Route path="/sources" element={<Sources />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/runs/:runId" element={<RunDetail />} />
           <Route path="/conversations" element={<Conversations />} />

@@ -103,6 +103,20 @@ export function isMessageQueuedEvent(event: DiagnosticEventPayload): boolean {
   return event.type === "message.queued";
 }
 
+// Classifies events by entry path (Control UI, OpenAI-compatible API, channel
+// plugin, ...). The classification leans on the existing `channel` field that
+// OpenClaw stamps on each event:
+//   - "webchat"    → OpenAI-compatible HTTP API (`/v1/chat/completions`)
+//   - "dashboard"  → OpenClaw Control UI built-in chat
+//   - <name>       → channel plugin (telegram, discord, feishu, etc.)
+export function extractSource(dims: EventDimensions): string | undefined {
+  const channel = dims.channel;
+  if (!channel) return undefined;
+  if (channel === "webchat") return "openai-api";
+  if (channel === "dashboard") return "control-ui";
+  return `channel:${channel}`;
+}
+
 export function isWebhookEvent(event: DiagnosticEventPayload): boolean {
   return event.type.startsWith("webhook.");
 }
