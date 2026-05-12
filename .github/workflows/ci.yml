@@ -1,0 +1,59 @@
+name: CI
+
+# Runs on every push to main and on every pull request targeting main.
+# What we verify:
+#   1. TypeScript compiles cleanly (backend + UI)
+#   2. Vitest suite is green
+#   3. Production build artifact builds (dist/) so publish-time surprises
+#      get caught here instead of at `npm publish` time
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Stop in-flight runs when a newer commit lands on the same ref. Saves a
+# few minutes when somebody pushes a fast follow-up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # No `cache: npm` here — the project's .npmrc points at an
+          # internal company mirror (registry.npmmirror.com) that runners
+          # cannot reach. We override the registry per-install below.
+
+      # The committed .npmrc targets a private mirror for local dev
+      # convenience. CI runners are outside that network, so install
+      # against the public registry explicitly. We do this without
+      # editing .npmrc so working trees on dev machines stay untouched.
+      - name: Install backend dependencies
+        run: npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund
+
+      - name: Typecheck (backend)
+        run: npm run typecheck
+
+      - name: Typecheck (UI)
+        working-directory: ui
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build (plugin + UI)
+        run: npm run build
