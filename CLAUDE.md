@@ -166,6 +166,13 @@
 
 34. **Conversation store 维护 runId → file in-memory 索引**（v0.9.2）：`get(runId)` 之前是 O(全部 jsonl 行) 线性扫描，retention 调长（30天）时单次 ~百毫秒。v0.9.2 引入 lazy 构建的 `runIdToFile` Map + `fileMtimeAtIndex` Map：首次 `get` 时全量扫，之后 `appendCompleted` 增量更新。`pruneOlderThan` 时反向清掉 index 里指向被删文件的 entry。**不要**换成 byte-offset 索引——audit record 大小可变（捕获完整 prompt，能到 MB 级），offset 脆且对维护一致性帮助不大；file-level 索引足够，匹配文件后再做一次倒序行扫即可。
 
+35. **UI 上所有显示 channel / source 字面值的位置必须经过 `friendlyEntryLabel`**（v0.9.2 之后强制规则）：禁止在 React 组件里直接渲染 `{r.channel}`、`{channelId}`、`{row.key}` 之类来自 backend 的原始 channel/source 字符串——那是 host 内部 token（绝大多数情况就是 `"webchat"`），运维看了无法分辨入口路径，是糟糕的 UX。**统一做法**：
+    - 表格行 channel/source 列：用 `friendlyEntryLabel(t, inferEntryKey(channel, trigger, runId))` 或 `friendlyEntryLabel(t, key)`（key 是 backend `extractSource` 已经派生过的）展示
+    - 原始 channel 值塞进 `title=` 作为 hover，方便排错（参见 `ui/src/pages/Conversations.tsx` 的 SessionRow / `ui/src/pages/Insights.tsx` 的 slow-calls 表）
+    - **每个新加的 UI 表格**如果有 channel/source 列，第一件事是 import `friendlyEntryLabel`，不要拖到 review 阶段才补
+    - Backend 的 REST 响应仍然返回**原始技术 id**（`"webchat"` / `"openai-api"` / `"channel:telegram"`）—— 不要把翻译做到后端，那是 i18n 关心的事，会让 API consumer 难以稳定 parse
+    - 当前覆盖了 Conversations / Channels / Sources / Insights 四页。新增页面时如果展示 channel 字段没用 helper，**视为 review block**。
+
 30. **`webchat` 是 host 的 INTERNAL_MESSAGE_CHANNEL 常量，不是浏览器聊天**（v0.8.3 + v0.8.4 改进）：OpenClaw `src/utils/message-channel-constants.ts:1` 把字符串 "webchat" 当作"所有非 channel-plugin 入口"的统一标识，覆盖：`/v1/chat/completions`、Control UI 内置聊天、heartbeat / cron / webhook 内部触发。**channel 字段单独无法区分这些路径**。要区分必须用：(a) runId 前缀：`chatcmpl_*` = OpenAI compat（host `openai-http.ts` 构造），`ctrl_*` = Control UI（host `server-chat.ts` 构造）；(b) trigger：`channel-message` = audit 路径（conversation-probe 合成），`user/heartbeat/cron/webhook` = host 设的。Host 实测**对 OpenAI compat 和 Control UI 都设 trigger=user**，所以**只靠 trigger 区分不可靠**，必须 runId 优先。共享逻辑：backend `src/pipeline/extractors.ts: extractSource`，UI `ui/src/entry-label.ts: inferEntryKey + friendlyEntryLabel`。**不要**让两个地方分别维护推断逻辑 — 始终走 ui/src/entry-label.ts 这个共享 helper。
 
 31. **Channels 页几乎没有信息密度，因为 host 都标 webchat**（v0.8.4 调整）：channels 维度按 host 的 channel 字段聚合，OpenClaw 默认配置下永远只有 "webchat" 一行。监控插件已经在 Channels 页加了 host 行为解释 hint，并把上面那张 "messages.delivered" 趋势图换成了 "model.calls"（消息送达事件 trusted 且 hook 也很少 fire，永远空，换成有数据的）。**真正的运维使用场景是 Sources 页**（按 entry path 拆分）。改 Channels 时不要再加 messages 相关的 chart / 计数 —— 那些 metric 在外部插件视角下只能拿到很少甚至 0 数据。

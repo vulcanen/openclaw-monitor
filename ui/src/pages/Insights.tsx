@@ -7,6 +7,7 @@ import {
   type SlowCallRow,
   type ToolFailureRow,
 } from "../api.js";
+import { friendlyEntryLabel, inferEntryKey } from "../entry-label.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
 
@@ -87,7 +88,20 @@ function SlowCallsPanel({
                 <td className="num">{idx + 1}</td>
                 <td className="num">{fmtMs(r.durationMs)}</td>
                 <td>{`${r.provider ?? "?"}/${r.model ?? "?"}`}</td>
-                <td>{r.channel ?? "—"}</td>
+                <td
+                  title={
+                    r.channel === "webchat"
+                      ? `host channel = "webchat" (INTERNAL_MESSAGE_CHANNEL). Display inferred from runId / trigger.`
+                      : r.channel
+                        ? `host channel = "${r.channel}"`
+                        : undefined
+                  }
+                >
+                  {(() => {
+                    const key = inferEntryKey(r.channel, r.trigger, r.runId);
+                    return key ? friendlyEntryLabel(t, key) : "—";
+                  })()}
+                </td>
                 <td className="num">{fmtBytes(r.responseStreamBytes)}</td>
                 <td>{fmtRelative(r.capturedAt, now)}</td>
                 <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>

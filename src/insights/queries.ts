@@ -59,6 +59,7 @@ export function createInsightsQueries(deps: {
           ? { sessionKey: raw["sessionKey"] as string }
           : {}),
         ...(typeof raw["channel"] === "string" ? { channel: raw["channel"] as string } : {}),
+        ...(typeof raw["trigger"] === "string" ? { trigger: raw["trigger"] as string } : {}),
         ...(typeof raw["responseStreamBytes"] === "number"
           ? { responseStreamBytes: raw["responseStreamBytes"] as number }
           : {}),

@@ -25,7 +25,14 @@ export type SlowCallRow = {
   runId?: string;
   callId?: string;
   sessionKey?: string;
+  /** Raw `channel` field from the host event (almost always "webchat" —
+   *  the host's INTERNAL_MESSAGE_CHANNEL constant). The UI translates
+   *  it through the shared inferEntryKey/friendlyEntryLabel helper
+   *  before showing it to humans. */
   channel?: string;
+  /** Host trigger hint, paired with runId prefix to disambiguate the
+   *  entry path on the UI side (OpenAI API vs Control UI vs internal). */
+  trigger?: string;
   /** Bytes the host's stream observer counted on the response — proxy
    *  for "how big was the answer". Helps explain *why* a call was slow. */
   responseStreamBytes?: number;

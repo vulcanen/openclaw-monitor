@@ -297,6 +297,7 @@ export type SlowCallRow = {
   callId?: string;
   sessionKey?: string;
   channel?: string;
+  trigger?: string;
   responseStreamBytes?: number;
 };
 
