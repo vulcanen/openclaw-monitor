@@ -265,9 +265,11 @@ export function createAggregator(): Aggregator {
     // (we synthesize it inside the fanout, not through the host event bus).
     if ((event.type as string) === "llm.tokens.recorded") {
       const tokenEvent = event as unknown as {
+        runId?: string;
         provider?: string;
         model?: string;
         channel?: string;
+        trigger?: string;
         inputTokens?: number;
         outputTokens?: number;
         cacheReadTokens?: number;
@@ -317,6 +319,8 @@ export function createAggregator(): Aggregator {
       // Per-source rollup (derived from channel by extractSource).
       const tokenSource = extractSource({
         ...(tokenEvent.channel !== undefined ? { channel: tokenEvent.channel } : {}),
+        ...(tokenEvent.trigger !== undefined ? { trigger: tokenEvent.trigger } : {}),
+        ...(tokenEvent.runId !== undefined ? { runId: tokenEvent.runId } : {}),
       });
       if (tokenSource) {
         const acc = accFor(sourceStats, tokenSource);

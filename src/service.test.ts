@@ -247,9 +247,13 @@ describe("hook metrics probe", () => {
     const handlers: CapturedHandlers = {};
     installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
 
+    // The host's hook ctx carries `trigger` alongside channelId — we add
+    // it here so the source classifier (v0.8.1+: trigger-aware) maps
+    // webchat + user → "openai-api" the same way real OpenAI-compat
+    // traffic does.
     handlers["model_call_started"]?.(
       { runId: "r1", callId: "c1", provider: "openai", model: "gpt-4" },
-      { channelId: "webchat" },
+      { channelId: "webchat", trigger: "user" },
     );
     handlers["model_call_ended"]?.(
       {
@@ -260,7 +264,7 @@ describe("hook metrics probe", () => {
         durationMs: 220,
         outcome: "completed",
       },
-      { channelId: "webchat" },
+      { channelId: "webchat", trigger: "user" },
     );
 
     const models = aggregator.models();
@@ -1087,6 +1091,7 @@ describe("cost engine (v0.8)", () => {
         provider: "qwen",
         model: "q3-5",
         channel: "webchat",
+        trigger: "user",
         inputTokens: 1000,
         outputTokens: 500,
         cacheReadTokens: 0,
