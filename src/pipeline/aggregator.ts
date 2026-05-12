@@ -39,6 +39,9 @@ type DimensionAccumulator = {
   durations: number[];
   tokensIn: number;
   tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
 };
 
 export type Aggregator = {
@@ -65,6 +68,16 @@ type EventTimePoint = {
   ts: number;
   type: string;
   outcome: "ok" | "error" | "blocked" | undefined;
+  /** Only set on llm.tokens.recorded events. Used by computeWindow to roll
+   *  up token + cost figures over rolling windows without keeping the full
+   *  event payload around. */
+  tokens?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    cost: number;
+  };
 };
 
 const MAX_RECENT_EVENTS = 10_000;
@@ -95,6 +108,9 @@ export function createAggregator(): Aggregator {
       durations: [],
       tokensIn: 0,
       tokensOut: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: 0,
     };
     map.set(key, fresh);
     return fresh;
@@ -239,6 +255,78 @@ export function createAggregator(): Aggregator {
       }
       void sourceCounted;
     }
+
+    // ── llm.tokens.recorded → cost + token rollups (v0.8.0+) ──────────────
+    // This event type is synthesized by hook-metrics from the host's
+    // `llm_output` hook (PluginHookLlmOutputEvent.usage). It carries the
+    // already-priced cost so the aggregator stays free of pricing logic.
+    // The cast is intentional: "llm.tokens.recorded" is a plugin-private
+    // type that doesn't appear in the host's DiagnosticEventPayload union
+    // (we synthesize it inside the fanout, not through the host event bus).
+    if ((event.type as string) === "llm.tokens.recorded") {
+      const tokenEvent = event as unknown as {
+        provider?: string;
+        model?: string;
+        channel?: string;
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+        cost?: number;
+      };
+      const inputTokens = tokenEvent.inputTokens ?? 0;
+      const outputTokens = tokenEvent.outputTokens ?? 0;
+      const cacheReadTokens = tokenEvent.cacheReadTokens ?? 0;
+      const cacheWriteTokens = tokenEvent.cacheWriteTokens ?? 0;
+      const cost = tokenEvent.cost ?? 0;
+
+      // The generic recent entry pushed at the top of ingest is missing the
+      // token payload. We could rewrite it in place, but window math only
+      // needs the *token-bearing* facet — so just attach it. Same ts, same
+      // type, no double counting.
+      const last = recent[recent.length - 1];
+      if (last && last.type === event.type) {
+        last.tokens = {
+          inputTokens: (last.tokens?.inputTokens ?? 0) + inputTokens,
+          outputTokens: (last.tokens?.outputTokens ?? 0) + outputTokens,
+          cacheReadTokens: (last.tokens?.cacheReadTokens ?? 0) + cacheReadTokens,
+          cacheWriteTokens: (last.tokens?.cacheWriteTokens ?? 0) + cacheWriteTokens,
+          cost: (last.tokens?.cost ?? 0) + cost,
+        };
+      }
+
+      // Per-model rollup (provider/model key, same shape as the Models page).
+      if (tokenEvent.provider || tokenEvent.model) {
+        const key = `${tokenEvent.provider ?? "unknown"}/${tokenEvent.model ?? "unknown"}`;
+        const acc = accFor(modelStats, key);
+        acc.tokensIn += inputTokens;
+        acc.tokensOut += outputTokens;
+        acc.cacheReadTokens += cacheReadTokens;
+        acc.cacheWriteTokens += cacheWriteTokens;
+        acc.cost += cost;
+      }
+      // Per-channel rollup.
+      if (tokenEvent.channel) {
+        const acc = accFor(channelStats, tokenEvent.channel);
+        acc.tokensIn += inputTokens;
+        acc.tokensOut += outputTokens;
+        acc.cacheReadTokens += cacheReadTokens;
+        acc.cacheWriteTokens += cacheWriteTokens;
+        acc.cost += cost;
+      }
+      // Per-source rollup (derived from channel by extractSource).
+      const tokenSource = extractSource({
+        ...(tokenEvent.channel !== undefined ? { channel: tokenEvent.channel } : {}),
+      });
+      if (tokenSource) {
+        const acc = accFor(sourceStats, tokenSource);
+        acc.tokensIn += inputTokens;
+        acc.tokensOut += outputTokens;
+        acc.cacheReadTokens += cacheReadTokens;
+        acc.cacheWriteTokens += cacheWriteTokens;
+        acc.cost += cost;
+      }
+    }
   };
 
   const cutoffsFromNow = (now: number) =>
@@ -262,6 +350,8 @@ export function createAggregator(): Aggregator {
       webhookEvents: 0,
       webhookErrors: 0,
       sessionsAlerted: 0,
+      totalTokens: 0,
+      totalCost: 0,
     };
     void now;
     const modelDurations: number[] = [];
@@ -297,6 +387,16 @@ export function createAggregator(): Aggregator {
       if (point.type === "session.stalled" || point.type === "session.stuck") {
         snap.sessionsAlerted += 1;
       }
+      // v0.8.0: roll up token + cost from llm.tokens.recorded entries
+      // whose `tokens` facet was attached when the event was ingested.
+      if (point.tokens) {
+        snap.totalTokens +=
+          point.tokens.inputTokens +
+          point.tokens.outputTokens +
+          point.tokens.cacheReadTokens +
+          point.tokens.cacheWriteTokens;
+        snap.totalCost += point.tokens.cost;
+      }
     }
     if (modelDurations.length > 0) {
       snap.modelP95Ms = percentile(modelDurations, 0.95);
@@ -326,6 +426,9 @@ export function createAggregator(): Aggregator {
         p95Ms: acc.durations.length > 0 ? percentile(acc.durations, 0.95) : null,
         ...(acc.tokensIn > 0 ? { tokensIn: acc.tokensIn } : {}),
         ...(acc.tokensOut > 0 ? { tokensOut: acc.tokensOut } : {}),
+        ...(acc.cacheReadTokens > 0 ? { cacheReadTokens: acc.cacheReadTokens } : {}),
+        ...(acc.cacheWriteTokens > 0 ? { cacheWriteTokens: acc.cacheWriteTokens } : {}),
+        ...(acc.cost > 0 ? { cost: acc.cost } : {}),
       });
     }
     rows.sort((a, b) => b.total - a.total);

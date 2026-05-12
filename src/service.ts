@@ -38,6 +38,10 @@ import {
   createAlertsHistoryHandler,
   createAlertsRulesHandler,
 } from "./alerts/rest-routes.js";
+import { createDailyCostStore } from "./costs/daily-store.js";
+import { createCostsHandler } from "./costs/rest-routes.js";
+import { createDailyCostStoreRef } from "./costs/store-ref.js";
+import { createPricingRef } from "./probes/hook-metrics.js";
 import {
   DEFAULT_MONITOR_CONFIG,
   type HttpRouteParams,
@@ -71,6 +75,13 @@ function mergeConfig(input?: Partial<MonitorConfig>): MonitorConfig {
       // a no-op when unset.
       channels: input?.alerts?.channels ?? DEFAULT_MONITOR_CONFIG.alerts.channels,
       rules: input?.alerts?.rules ?? DEFAULT_MONITOR_CONFIG.alerts.rules,
+    },
+    pricing: {
+      ...DEFAULT_MONITOR_CONFIG.pricing,
+      ...input?.pricing,
+      // Same rationale as alerts.channels: the operator's models table
+      // *replaces* the default (which is empty), it doesn't merge into it.
+      models: input?.pricing?.models ?? DEFAULT_MONITOR_CONFIG.pricing.models,
     },
   };
 }
@@ -116,6 +127,8 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
   const storeRef = createStoreRef();
   const conversationStoreRef = createConversationStoreRef();
   const conversationProbe = createConversationProbe();
+  const dailyCostStoreRef = createDailyCostStoreRef();
+  const pricingRef = createPricingRef(config.pricing);
 
   let retention: ReturnType<typeof createRetentionScheduler> | undefined;
   let auditRetentionTimer: NodeJS.Timeout | undefined;
@@ -127,6 +140,7 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
     aggregator,
     runsTracker,
     conversationProbe,
+    dailyCostStoreRef,
   });
 
   const alertEngine = createAlertEngine({
@@ -219,6 +233,31 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
         }
       }
 
+      // Daily-cost store (v0.8.0+). Same root dir as events JSONL so all
+      // operator data sits in one place; pruning runs on the same hourly
+      // cadence as audit retention but with its own retention window
+      // (default 90 days — long enough to cover "this month" with margin).
+      try {
+        const dailyStore = createDailyCostStore(
+          path.join(resolveStorageRoot(ctx), "daily-costs"),
+        );
+        dailyCostStoreRef.set(dailyStore);
+      } catch (err) {
+        ctx.logger?.warn?.(
+          `[${PLUGIN_ID}] failed to open daily-cost store: ${String(err)}`,
+        );
+        dailyCostStoreRef.set(undefined);
+      }
+
+      // Apply the live pricing config so newly-fired llm_output hooks price
+      // tokens against the operator's table.
+      pricingRef.set(config.pricing);
+      if (Object.keys(config.pricing.models).length === 0 && ctx.logger) {
+        ctx.logger.info?.(
+          `[${PLUGIN_ID}] no pricing.models entries configured — tokens will be counted but cost will be 0`,
+        );
+      }
+
       fanout.start();
 
       alertEngine.setConfig(config.alerts);
@@ -251,6 +290,11 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       auditStore?.close();
       conversationStoreRef.set(undefined);
       conversationProbe.setStore(undefined);
+      // Flush daily-cost in-memory tail to disk so the next start can read
+      // today's totals back.
+      const dailyStore = dailyCostStoreRef.get();
+      dailyStore?.close();
+      dailyCostStoreRef.set(undefined);
       bus.reset();
     },
   };
@@ -385,6 +429,17 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       gatewayRuntimeScopeSurface: "trusted-operator",
       handler: createAlertsHistoryHandler(alertEngine),
     },
+    {
+      path: "/api/monitor/costs",
+      auth: "gateway",
+      match: "exact",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+      handler: createCostsHandler({
+        aggregator,
+        pricing: () => pricingRef.get(),
+        dailyStoreRef: dailyCostStoreRef,
+      }),
+    },
   ];
 
   if (config.ui.enabled) {
@@ -411,7 +466,7 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       // payloads into the fanout. This makes Models / Tools / Runs pages
       // populate even when the host's diagnostic event bus is silent for a
       // particular code path.
-      installHookMetrics({ api, fanout });
+      installHookMetrics({ api, fanout, pricing: pricingRef });
     },
   };
 }

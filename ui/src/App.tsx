@@ -5,6 +5,7 @@ import { Alerts } from "./pages/Alerts.js";
 import { Channels } from "./pages/Channels.js";
 import { ConversationDetail } from "./pages/ConversationDetail.js";
 import { Conversations } from "./pages/Conversations.js";
+import { Costs } from "./pages/Costs.js";
 import { Logs } from "./pages/Logs.js";
 import { Models } from "./pages/Models.js";
 import { Overview } from "./pages/Overview.js";
@@ -28,6 +29,7 @@ export function App() {
           <Route path="/runs/:runId" element={<RunDetail />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/conversations/:runId" element={<ConversationDetail />} />
+          <Route path="/costs" element={<Costs />} />
           <Route path="/logs" element={<Logs />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />

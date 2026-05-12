@@ -1,6 +1,29 @@
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { EventFanout } from "./event-subscriber.js";
+import { buildTokenEvent } from "../costs/pricing.js";
+import type { PricingConfig } from "../costs/types.js";
+import { DEFAULT_PRICING_CONFIG } from "../costs/types.js";
+
+/**
+ * Pricing changes at runtime when service.start re-reads the config. Hook
+ * callbacks captured the closure at install time, so we route every lookup
+ * through this mutable ref instead of a captured value.
+ */
+export type PricingRef = {
+  get: () => PricingConfig;
+  set: (next: PricingConfig) => void;
+};
+
+export function createPricingRef(initial: PricingConfig = DEFAULT_PRICING_CONFIG): PricingRef {
+  let current = initial;
+  return {
+    get: () => current,
+    set: (next) => {
+      current = next;
+    },
+  };
+}
 
 /**
  * Hook-driven metrics capture.
@@ -75,9 +98,12 @@ function makeRunContextRegistry() {
 export function installHookMetrics(params: {
   api: OpenClawPluginApi;
   fanout: EventFanout;
+  pricing?: PricingRef;
 }): void {
   const { api, fanout } = params;
+  const pricing = params.pricing ?? createPricingRef();
   const runCtx = makeRunContextRegistry();
+  let tokenSeq = 0;
 
   const enrich = (synth: Record<string, unknown>, runId?: string): void => {
     if (synth["channel"] !== undefined && synth["trigger"] !== undefined) return;
@@ -130,6 +156,57 @@ export function installHookMetrics(params: {
     if (ctx.trigger !== undefined) synth["trigger"] = ctx.trigger;
     enrich(synth, event.runId);
     fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── LLM output / token accounting (v0.8.0+) ────────────────────────────
+  // The model_call_ended hook fires *before* the host finishes parsing the
+  // assistant message, so its event doesn't carry usage data. The
+  // llm_output hook is where token counts (input/output, plus optional
+  // cacheRead/cacheWrite) become available — see
+  // host: src/plugins/hook-types.ts: PluginHookLlmOutputEvent.
+  //
+  // This hook is gated by plugins.entries.openclaw-monitor.hooks
+  //   .allowConversationAccess in the host config — the same security
+  // gate the audit module uses. With the gate off, the host silently
+  // refuses to fire the hook and cost rollups will stay at zero (token
+  // counts too). The Costs page surfaces this state as a banner.
+  api.on("llm_output", (event, ctx) => {
+    const usage = event.usage;
+    if (!usage) return;
+    const input = typeof usage.input === "number" ? usage.input : 0;
+    const output = typeof usage.output === "number" ? usage.output : 0;
+    const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : undefined;
+    const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : undefined;
+    if (input === 0 && output === 0 && !cacheRead && !cacheWrite) {
+      // Some providers report zero usage when streaming without
+      // include_usage; emitting a record would dilute cost trends with
+      // empty entries. Skip silently.
+      return;
+    }
+    tokenSeq += 1;
+    const synth = buildTokenEvent({
+      pricing: pricing.get(),
+      ...(event.runId !== undefined ? { runId: event.runId } : {}),
+      ...(event.sessionId !== undefined ? { sessionId: event.sessionId } : {}),
+      ...(ctx.sessionKey !== undefined ? { sessionKey: ctx.sessionKey } : {}),
+      ...(event.provider !== undefined ? { provider: event.provider } : {}),
+      ...(event.model !== undefined ? { model: event.model } : {}),
+      ...(ctx.channelId !== undefined ? { channel: ctx.channelId } : {}),
+      ...(ctx.trigger !== undefined ? { trigger: ctx.trigger } : {}),
+      usage: {
+        inputTokens: input,
+        outputTokens: output,
+        ...(cacheRead !== undefined ? { cacheReadTokens: cacheRead } : {}),
+        ...(cacheWrite !== undefined ? { cacheWriteTokens: cacheWrite } : {}),
+      },
+      seq: tokenSeq,
+    });
+    // Backfill channel/trigger from the runId cache for the (rare) case
+    // where the llm_output ctx doesn't carry them yet but agent_turn_prepare
+    // already populated the registry.
+    const enriched = { ...synth } as Record<string, unknown>;
+    enrich(enriched, event.runId);
+    fanout.inject(enriched as unknown as DiagnosticEventPayload);
   });
 
   // ── Tool execution ────────────────────────────────────────────────────────

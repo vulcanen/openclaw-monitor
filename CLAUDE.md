@@ -144,6 +144,18 @@
 
 23. **alerts UI 是只读列表**（v0.7.0）：`ui/src/pages/Alerts.tsx` 只渲染 rules / active / history 三个表，**不做 CRUD**。规则编辑唯一入口是 `~/.openclaw/openclaw.json`，改完重启 gateway。理由：把可视化编辑做到 v0.7 会让 UI 工作量 ×3，先把数据通路打通；v0.8+ 真有用户反馈再考虑加。
 
+24. **Token 数据走 `llm_output` hook，cost 在采集端预算**（v0.8.0）：`model_call_ended` event 不带 token 数（host 在 stream observer 结束时 emit，那时 assistant message 还没 parse 完）。Token + cost 来自 `api.on("llm_output", ...)`，事件 `event.usage = {input, output, cacheRead, cacheWrite, total}`（host 类型 `PluginHookLlmOutputEvent`）。这个 hook **依赖** `hooks.allowConversationAccess` 安全门（同 audit）—— 用户没开就拿不到 token，Costs 页 cost 全 0。在 hook-metrics 里用 `pricing` ref 算好 cost 后 inject 一个新合成事件 `llm.tokens.recorded`，aggregator 看到这个 type 时按 model/channel/source 累计 token + cost。**不要**改成把 cost 算放到 aggregator 或 REST handler —— 那样 daily-cost JSONL 写盘时还得知道 pricing 又是一个 ref 注入链。
+
+25. **`llm.tokens.recorded` 是 plugin-private 类型**（v0.8.0）：不在 host 的 `DiagnosticEventPayload` union 里（host SDK 不知道这个 type）。需要的地方用 `(event.type as string) === "llm.tokens.recorded"` 比较（TS 否则报 union 无重叠）。fanout 接收这个事件后**额外**喂给 `dailyCostStoreRef.get()?.recordTokenEvent` 做日级累计；常规事件走完 buffer / aggregator / SSE bus 后顺带写一份 JSON 进 daily-costs JSONL。**不要**让 hook-metrics 直接调 daily store —— fanout 是唯一统一分发点，旁路绕过破坏一致性。
+
+26. **DimensionRow 上的 cost / cacheRead/Write 字段是可选**（v0.8.0）：v0.8 之前 row 只有 total/errors/p50/p95/tokensIn/tokensOut；新加的 cost / cacheReadTokens / cacheWriteTokens 都是 optional，0 时不出现在 JSON 里（aggregator.ts: dimensionRows 用 conditional spread）。**不要**改成默认 0 写出——会让 Channels / Models 页面在没成本数据时多出一列空 `0`。
+
+27. **Daily-cost 存储是文件-per-day 全量 JSON**（v0.8.0）：`<stateDir>/openclaw-monitor/daily-costs/daily-costs-YYYY-MM-DD.json`，每天一个文件，文件内是当日完整累计 + byModel 分桶。写入逻辑 = 内存累加 + 1s 防抖 flush + 整文件 `writeFileSync` 覆盖。不是 append-only！因为成本是单调加法，每次 flush 都是"完整快照"。`createDailyCostStore.close()` 必须在 service.stop 调，否则最近 1s 的累加丢盘。retention 用 `pruneOlderThan` 按文件名日期 unlink，默认 90 天（明显比 events.jsonl 默认 7 天长，因为月度成本需要看完整月）。**绝对不要**把这种"全量覆写"的格式改成 jsonl append-only —— 当日多次 flush 会写成多条行，rangeSum 重复累计。
+
+28. **windows snapshot 的 totalTokens 含义**（v0.8.0）：`WindowSnapshot.totalTokens` 是 input + output + cacheRead + cacheWrite **四类合计**，不是单一 input。`/api/monitor/costs` 把它放到 `windows[w].tokensIn` 字段里（CostRangeSummary 字段名复用，没增字段），UI 直接读 `tokensIn` 当总 token 显示。这是个故意的字段名复用 —— 真要分开看四类，去 Costs 页的 byModel 表（每行单独列）。改 windows 计算时**不要**只加 input 一类，会让今日 stat card 数字偏小。
+
+29. **Token 数据有 provider 依赖，不在我们可控范围内**（v0.8.0 已知限制）：cost 计算 100% 依赖 `llm_output` hook 的 `event.usage`。host 这个 hook 何时 fire 取决于代码路径 + provider response 是否带 usage（OpenAI compat 响应里的 `usage: {prompt_tokens, completion_tokens, total_tokens}`）。实测某些自建 / 代理 OpenAI compat 网关（比如本仓库测试用的 qwen 上游 `your-llm-endpoint.example.com`）**完全不返回 usage**（response 里全是 0），host 也就不解析、不 fire 完整的 llm_output 带 usage 块。这种情况下 Costs 页会一直显示 0 —— 不是 bug，是**采集源**的物理限制。Costs UI 已加 detection：所有 byModel.tokensIn === 0 但 calls > 0 时弹"上游不返回 usage"banner。**不要**改成"prompt char count / 4 估算"绕开 —— 估算精度对 cost 来说太差，会给运营错误信号；要修就推上游 provider 加 usage 透传，或者换一个会返回 usage 的 provider/上游。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：
