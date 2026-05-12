@@ -9,6 +9,36 @@ export const zh = {
   "nav.conversations": "对话",
   "nav.logs": "日志",
   "nav.alerts": "告警",
+  "nav.costs": "成本",
+
+  // Costs (v0.8.0+)
+  "costs.title": "成本 / Token 经济学",
+  "costs.subtitle": "货币：{currency} · 数据来自 llm_output hook，依赖 audit 安全门。更新时间：{time}",
+  "costs.range.today": "今日 (UTC)",
+  "costs.range.thisWeek": "本周 (UTC, 周一起)",
+  "costs.range.thisMonth": "本月 (UTC, 1 号起)",
+  "costs.range.sinceStart": "进程启动以来",
+  "costs.stat.tokensTotal": "{value} tokens",
+  "costs.chart.last30d": "最近 30 天每日成本",
+  "costs.section.byModel": "按 provider / model",
+  "costs.section.byChannel": "按 channel",
+  "costs.section.bySource": "按入口来源",
+  "costs.col.calls": "调用",
+  "costs.col.tokensIn": "输入 token",
+  "costs.col.tokensOut": "输出 token",
+  "costs.col.cost": "成本",
+  "costs.col.model": "provider / model",
+  "costs.col.channel": "channel",
+  "costs.col.source": "source",
+  "costs.empty.dimension": "暂无数据",
+  "costs.empty.daily": "暂无日度成本数据，需要至少跑过一次模型调用",
+  "costs.notice.noPricing": "已记录 token，但价格表为空，成本全部为 0",
+  "costs.notice.noPricingHint":
+    "在 ~/.openclaw/openclaw.json 的 plugins.entries.openclaw-monitor.config.pricing.models 里加你用到的 provider/model 价格 (per 1k tokens)，重启 gateway 后会生效。",
+  "costs.notice.noTokens": "Token 数据为 0：上游 provider 未在响应里返回 usage 字段",
+  "costs.notice.noTokensHint":
+    "成本依赖 llm_output hook 提供的 usage（input/output/cacheRead/cacheWrite）。如果上游 LLM provider 在 OpenAI 兼容响应里不带 usage（部分自建网关、代理或模型会忽略），Costs 页会一直显示 0。确认上游响应的 usage 字段是否非零；如果是代理网关，可能要在代理那边加上 usage 透传。",
+
 
   // Alerts (v0.7.0+)
   "alerts.title": "告警",

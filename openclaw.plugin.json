@@ -239,6 +239,49 @@
             }
           }
         }
+      },
+      "pricing": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Per-1000-token price table used by the cost engine (v0.8.0+). Tokens are always counted regardless of the table; a model that is not listed contributes zero cost (no error). All prices share a single currency — no FX conversion happens.",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "default": "CNY",
+            "description": "Display unit for every cost figure. Free-form (e.g. CNY, USD, EUR). Make sure every entry in `models` uses the same currency."
+          },
+          "models": {
+            "type": "object",
+            "description": "Price entries keyed by the canonical provider/model reference (the same string the Models page shows). Each entry sets per-1000-token rates.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "input": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Cost per 1,000 input tokens."
+                },
+                "output": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Cost per 1,000 output tokens."
+                },
+                "cacheRead": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Optional. Cost per 1,000 cache-read tokens (Anthropic-style prompt caching). Defaults to `input` when omitted."
+                },
+                "cacheWrite": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Optional. Cost per 1,000 cache-write tokens. Defaults to `input` when omitted."
+                }
+              },
+              "required": ["input", "output"]
+            }
+          }
+        }
       }
     }
   }

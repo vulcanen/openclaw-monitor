@@ -21,6 +21,12 @@ export type EventFanoutDeps = {
   aggregator: Aggregator;
   runsTracker: RunsTracker;
   conversationProbe: ConversationProbe;
+  /**
+   * Optional: when set, every `llm.tokens.recorded` event passed through
+   * the fanout is also folded into the calendar-day persistent rollup so
+   * today/week/month totals survive restarts. Wired in v0.8.0.
+   */
+  dailyCostStoreRef?: import("../costs/store-ref.js").DailyCostStoreRef;
 };
 
 export function createEventFanout(deps: EventFanoutDeps): EventFanout {
@@ -89,6 +95,17 @@ export function createEventFanout(deps: EventFanoutDeps): EventFanout {
       deps.storeRef.get()?.appendEvent(event, capturedAt);
     } catch {
       // best-effort persistence
+    }
+    // Calendar-day cost rollup (v0.8.0+). The daily store does its own
+    // debounced flushing to disk; we just feed it the priced event.
+    if ((event.type as string) === "llm.tokens.recorded" && deps.dailyCostStoreRef) {
+      try {
+        deps.dailyCostStoreRef.get()?.recordTokenEvent(
+          event as unknown as import("../costs/types.js").TokenRecordedEvent,
+        );
+      } catch {
+        // best-effort
+      }
     }
     try {
       deps.bus.publish({ event, capturedAt });

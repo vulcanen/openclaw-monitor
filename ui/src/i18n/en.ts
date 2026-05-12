@@ -11,6 +11,36 @@ export const en: Strings = {
   "nav.conversations": "Conversations",
   "nav.logs": "Logs",
   "nav.alerts": "Alerts",
+  "nav.costs": "Costs",
+
+  // Costs (v0.8.0+)
+  "costs.title": "Costs / Token Economics",
+  "costs.subtitle": "currency: {currency} · sourced from the llm_output hook, gated by audit · refreshed {time}",
+  "costs.range.today": "today (UTC)",
+  "costs.range.thisWeek": "this week (UTC, since Monday)",
+  "costs.range.thisMonth": "this month (UTC, since the 1st)",
+  "costs.range.sinceStart": "since process start",
+  "costs.stat.tokensTotal": "{value} tokens",
+  "costs.chart.last30d": "daily cost · last 30 days",
+  "costs.section.byModel": "by provider / model",
+  "costs.section.byChannel": "by channel",
+  "costs.section.bySource": "by entry source",
+  "costs.col.calls": "calls",
+  "costs.col.tokensIn": "tokens in",
+  "costs.col.tokensOut": "tokens out",
+  "costs.col.cost": "cost",
+  "costs.col.model": "provider / model",
+  "costs.col.channel": "channel",
+  "costs.col.source": "source",
+  "costs.empty.dimension": "no data yet",
+  "costs.empty.daily": "no daily cost data yet — run at least one model call",
+  "costs.notice.noPricing": "tokens recorded but the price table is empty — every cost is 0",
+  "costs.notice.noPricingHint":
+    "Add your provider/model entries to plugins.entries.openclaw-monitor.config.pricing.models (per 1k tokens) in ~/.openclaw/openclaw.json, then restart the gateway.",
+  "costs.notice.noTokens": "token data is 0 — the upstream provider isn't returning `usage` in its response",
+  "costs.notice.noTokensHint":
+    "Cost depends on the usage block (input/output/cacheRead/cacheWrite) surfaced by the llm_output hook. If your upstream LLM provider omits `usage` from the OpenAI-compatible response (some self-hosted gateways, proxies, or specific models do), this page will stay at 0. Verify the upstream response carries non-zero usage; if it goes through a proxy, the proxy may need to forward `usage` from the underlying model.",
+
 
   // Alerts (v0.7.0+)
   "alerts.title": "Alerts",

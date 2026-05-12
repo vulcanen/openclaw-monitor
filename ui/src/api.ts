@@ -269,6 +269,39 @@ export const api = {
     getJson<{ count: number; entries: AlertHistoryEntry[] }>(
       `/alerts/history?limit=${limit}`,
     ),
+  costs: () => getJson<CostSnapshot>("/costs"),
+};
+
+export type CostRangeSummary = {
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
+};
+
+export type CostDimensionRow = {
+  key: string;
+  calls: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
+};
+
+export type CostSnapshot = {
+  generatedAt: string;
+  currency: string;
+  sinceStart: CostRangeSummary;
+  windows: Record<"1m" | "5m" | "15m" | "1h", CostRangeSummary>;
+  today: CostRangeSummary;
+  thisWeek: CostRangeSummary;
+  thisMonth: CostRangeSummary;
+  daily: Array<{ day: string } & CostRangeSummary>;
+  byModel: CostDimensionRow[];
+  byChannel: CostDimensionRow[];
+  bySource: CostDimensionRow[];
 };
 
 export type AlertSeverity = "info" | "warn" | "error";

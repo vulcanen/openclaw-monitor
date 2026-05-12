@@ -2,6 +2,8 @@ import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runt
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { AlertsConfig } from "./alerts/types.js";
 import { DEFAULT_ALERTS_CONFIG } from "./alerts/types.js";
+import type { PricingConfig } from "./costs/types.js";
+import { DEFAULT_PRICING_CONFIG } from "./costs/types.js";
 
 export type EventType = DiagnosticEventPayload["type"];
 
@@ -41,6 +43,11 @@ export type WindowSnapshot = {
   webhookEvents: number;
   webhookErrors: number;
   sessionsAlerted: number;
+  /** Sum of input + output + cache tokens recorded in this window
+   *  (from llm.tokens.recorded). v0.8.0+. */
+  totalTokens: number;
+  /** Pre-priced cost in the configured currency. v0.8.0+. */
+  totalCost: number;
 };
 
 export type DimensionRow = {
@@ -51,6 +58,12 @@ export type DimensionRow = {
   p95Ms: number | null;
   tokensIn?: number;
   tokensOut?: number;
+  /** v0.8.0+. Sum of cache-read tokens recorded against this dimension. */
+  cacheReadTokens?: number;
+  /** v0.8.0+. Sum of cache-write tokens recorded against this dimension. */
+  cacheWriteTokens?: number;
+  /** v0.8.0+. Priced cost in the configured currency. */
+  cost?: number;
 };
 
 export type RunSnapshot = {
@@ -113,6 +126,7 @@ export type MonitorConfig = {
     captureSystemPrompt: boolean;
   };
   alerts: AlertsConfig;
+  pricing: PricingConfig;
 };
 
 export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
@@ -133,6 +147,7 @@ export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
     captureSystemPrompt: true,
   },
   alerts: DEFAULT_ALERTS_CONFIG,
+  pricing: DEFAULT_PRICING_CONFIG,
 };
 
 export type HttpRouteParams = Parameters<OpenClawPluginApi["registerHttpRoute"]>[0];

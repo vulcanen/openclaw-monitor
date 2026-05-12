@@ -12,6 +12,7 @@ Real-time monitoring plugin for OpenClaw. Subscribes to the internal diagnostic 
 - **Diagnostic event stream**: every captured event rendered as a log line with an inferred severity (error / warn / info / debug); filterable by level, component substring, event type
 - **Conversation audit** *(optional)*: captures the four touchpoints of a conversation — project → OpenClaw → LLM → OpenClaw → project — across multi-hop LLM calls; the list groups by `sessionKey` with collapsible panels, the detail view shows full prompts and responses (1 MiB per-segment cap by default)
 - **Alert engine** *(optional)*: periodically evaluates rolling-window metrics against threshold rules; on match, pushes to a generic webhook or DingTalk custom robot; supports cooldown and resolve notifications; active alerts / rule state / 24h history visible on the Alerts page
+- **Cost / token economics** *(needs audit gate + upstream usage)*: configurable price table per provider/model (per 1k tokens for input / output / cacheRead / cacheWrite); rolling-window cost figures + persistent today / this-week / this-month / last-30-days totals (UTC); per-model / per-channel / per-source breakdown on the Costs page. Token figures come from the `llm_output` hook's `usage` block — if your upstream LLM provider doesn't return `usage` in its OpenAI-compat response, this page will stay at 0 (the Costs page detects and surfaces this).
 - **Live stream**: SSE push at `/api/monitor/stream`, the dashboard subscribes automatically
 - **Zero external dependencies**: JSONL files for persistence, partitioned by date with background retention; no native modules
 - **i18n**: Chinese by default, switch to English with one click
@@ -76,6 +77,19 @@ Full options with defaults (written to OpenClaw's `~/.openclaw/openclaw.json`):
             "contentMaxBytes": 1048576,      // per-segment cap (1 MiB, max 16 MiB)
             "retainDays": 3,                 // days of conversation JSONL kept
             "captureSystemPrompt": true
+          },
+          "pricing": {
+            "currency": "CNY",               // free-form display unit; no FX conversion
+            "models": {
+              "qwen/qwen3-5-397b-a17b": { "input": 0.0008, "output": 0.002 },
+              "openai/gpt-4":           { "input": 0.03,   "output": 0.06 },
+              "anthropic/claude-3.5-sonnet": {
+                "input": 0.003,
+                "output": 0.015,
+                "cacheRead": 0.0003,         // optional; defaults to `input`
+                "cacheWrite": 0.00375        // optional; defaults to `input`
+              }
+            }
           },
           "alerts": {
             "enabled": false,                // off by default; requires channels + rules to activate
@@ -156,6 +170,7 @@ All `/api/monitor/*` routes require `Authorization: Bearer <gateway-operator-tok
 | `GET /api/monitor/alerts/rules` | Current alert rules + engine running state |
 | `GET /api/monitor/alerts/active` | Currently firing alerts |
 | `GET /api/monitor/alerts/history?limit=` | Last 24h of alert events (fired / renotified / resolved) |
+| `GET /api/monitor/costs` | Cost snapshot: sinceStart / windows / today / thisWeek / thisMonth / 30-day daily trend + per model / channel / source breakdown |
 | `GET /monitor/*` | Bundled dashboard |
 
 ## Privacy and storage
