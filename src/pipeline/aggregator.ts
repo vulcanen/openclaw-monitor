@@ -68,6 +68,9 @@ type EventTimePoint = {
   ts: number;
   type: string;
   outcome: "ok" | "error" | "blocked" | undefined;
+  /** Duration in ms — set on terminal model.call / tool.execution events
+   *  so computeWindow can roll up P50/P95 latency over rolling windows. */
+  durationMs?: number;
   /** Only set on llm.tokens.recorded events. Used by computeWindow to roll
    *  up token + cost figures over rolling windows without keeping the full
    *  event payload around. */
@@ -134,7 +137,20 @@ export function createAggregator(): Aggregator {
     const dims = extractDimensions(event);
     const isError = dims.outcome === "error";
 
-    recent.push({ ts: capturedAtMs, type: event.type, outcome: dims.outcome });
+    // Stamp durationMs on the recent ring for terminal model.call / tool
+    // events so computeWindow can compute rolling-window P50/P95 latency.
+    // Started events have no duration; they're elided here as undefined.
+    const isTerminalCall =
+      (isModelCallEvent(event) && event.type !== "model.call.started") ||
+      (isToolExecutionEvent(event) && event.type !== "tool.execution.started");
+    recent.push({
+      ts: capturedAtMs,
+      type: event.type,
+      outcome: dims.outcome,
+      ...(isTerminalCall && typeof dims.durationMs === "number"
+        ? { durationMs: dims.durationMs }
+        : {}),
+    });
     if (recent.length > MAX_RECENT_EVENTS) {
       recent.shift();
     }
@@ -366,6 +382,7 @@ export function createAggregator(): Aggregator {
       if (point.type.startsWith("model.call.") && point.type !== "model.call.started") {
         snap.modelCalls += 1;
         if (point.outcome === "error") snap.modelErrors += 1;
+        if (typeof point.durationMs === "number") modelDurations.push(point.durationMs);
       }
       if (
         point.type.startsWith("tool.execution.") &&

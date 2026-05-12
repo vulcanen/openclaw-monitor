@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OpenClawPluginHttpRouteHandler } from "openclaw/plugin-sdk/plugin-entry";
 import type { ConversationProbe } from "./conversation-probe.js";
 import type { ConversationStore } from "./conversation-store.js";
-import type { ConversationRecord, ConversationSummary } from "./types.js";
+import { summarizeConversation } from "./summarize.js";
+import type { ConversationSummary } from "./types.js";
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -15,36 +16,6 @@ function parseQuery(url: string | undefined): URLSearchParams {
   if (!url) return new URLSearchParams();
   const idx = url.indexOf("?");
   return idx === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(idx + 1));
-}
-
-function summarizeRuntime(record: ConversationRecord): ConversationSummary {
-  let totalIn = 0;
-  let totalOut = 0;
-  for (const out of record.llmOutputs) {
-    totalIn += out.usage?.input ?? 0;
-    totalOut += out.usage?.output ?? 0;
-  }
-  const lastOutput = record.llmOutputs[record.llmOutputs.length - 1];
-  const responseText = lastOutput?.assistantTexts.join(" ").slice(0, 160);
-  return {
-    runId: record.runId,
-    ...(record.sessionId !== undefined ? { sessionId: record.sessionId } : {}),
-    ...(record.sessionKey !== undefined ? { sessionKey: record.sessionKey } : {}),
-    ...(record.channelId !== undefined ? { channelId: record.channelId } : {}),
-    ...(record.trigger !== undefined ? { trigger: record.trigger } : {}),
-    status: record.status,
-    startedAt: record.startedAt,
-    ...(record.endedAt !== undefined ? { endedAt: record.endedAt } : {}),
-    ...(record.durationMs !== undefined ? { durationMs: record.durationMs } : {}),
-    llmHops: record.llmInputs.length,
-    totalTokensIn: totalIn,
-    totalTokensOut: totalOut,
-    ...(record.inbound?.prompt
-      ? { promptPreview: record.inbound.prompt.slice(0, 160) }
-      : {}),
-    ...(responseText ? { responsePreview: responseText } : {}),
-    hasError: record.status === "error" || Boolean(record.errorMessage),
-  };
 }
 
 type SessionGroup = {
@@ -130,7 +101,7 @@ export function createConversationsListHandler(params: {
     for (const record of recent) {
       if (seen.has(record.runId)) continue;
       seen.add(record.runId);
-      merged.push(summarizeRuntime(record));
+      merged.push(summarizeConversation(record));
     }
     for (const summary of persisted) {
       if (seen.has(summary.runId)) continue;

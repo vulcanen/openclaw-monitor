@@ -67,6 +67,12 @@ export type WebhookChannelConfig = {
   url: string;
   /** Extra headers to attach (auth token, custom JSON shape signal, …). */
   headers?: Record<string, string>;
+  /**
+   * Opt-in to point the webhook at a private / loopback / link-local
+   * host (e.g. an internal incident receiver at 10.x.x.x). Off by
+   * default to avoid trivial SSRF when config is misconfigured.
+   */
+  allowPrivateNetwork?: boolean;
 };
 
 export type DingTalkChannelConfig = {
@@ -85,6 +91,9 @@ export type DingTalkChannelConfig = {
    */
   atMobiles?: string[];
   atAll?: boolean;
+  /** Same opt-out as WebhookChannelConfig; required if you self-host a
+   *  DingTalk-compatible relay on a private network. */
+  allowPrivateNetwork?: boolean;
 };
 
 export type AlertChannelConfig = WebhookChannelConfig | DingTalkChannelConfig;

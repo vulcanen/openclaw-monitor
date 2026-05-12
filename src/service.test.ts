@@ -1010,6 +1010,44 @@ describe("alert engine (v0.7)", () => {
     }
   });
 
+  it("webhook channel rejects private-network URLs by default (v0.9.2)", async () => {
+    const { sendWebhook } = await import("./alerts/channels/webhook.js");
+    for (const bad of [
+      "http://127.0.0.1/hook",
+      "http://10.0.0.5/hook",
+      "http://192.168.1.1/hook",
+      "http://169.254.169.254/latest/meta-data",
+      "http://localhost:9090/hook",
+      "file:///etc/passwd",
+      "javascript:alert(1)",
+    ]) {
+      let thrown: unknown;
+      try {
+        await sendWebhook({ kind: "webhook", url: bad }, {
+          type: "fired", rule: { id: "x", name: "x", severity: "info" },
+          metric: { name: "modelCalls", window: "1m", op: ">", threshold: 0, value: 1 },
+          firedAt: "", capturedAt: "",
+        } as never);
+      } catch (e) { thrown = e; }
+      expect(thrown).toBeDefined();
+    }
+    // allowPrivateNetwork opt-in should NOT reject the URL on the guard.
+    // We use a fetch recorder so the request itself stays in-process.
+    const original = globalThis.fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () =>
+      new Response("{}", { status: 200 })) as typeof fetch;
+    try {
+      await sendWebhook(
+        { kind: "webhook", url: "http://127.0.0.1/hook", allowPrivateNetwork: true },
+        { type: "fired", rule: { id: "x", name: "x", severity: "info" },
+          metric: { name: "modelCalls", window: "1m", op: ">", threshold: 0, value: 1 },
+          firedAt: "", capturedAt: "" } as never,
+      );
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = original;
+    }
+  });
+
   it("dingtalk channel signs the request when a secret is configured", async () => {
     const { __testing } = await import("./alerts/channels/dingtalk.js");
     const url = "https://oapi.dingtalk.com/robot/send?access_token=abc";

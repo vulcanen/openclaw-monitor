@@ -267,36 +267,69 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       // arrives. We rebuild state by feeding back the events the JSONL
       // store already captured. Replay happens *before* fanout.start so
       // we don't race the first incoming live events.
+      //
+      // Two safety knobs added in v0.9.2:
+      //   - REPLAY_TAIL_LIMIT caps the number of events we replay so a
+      //     very chatty day (millions of events) can't lock service.start
+      //     for tens of seconds. We replay the *most recent* N because
+      //     the rolling windows only need recent data anyway.
+      //   - REPLAY_CHUNK + setImmediate yield the event loop every N
+      //     events so the HTTP server can serve health checks while
+      //     replay is running, instead of blocking until done.
       const jsonlStoreNow = storeRef.get();
       if (jsonlStoreNow) {
-        try {
-          const today = new Date().toISOString().slice(0, 10);
-          const events = jsonlStoreNow.readEventsForDay(today);
-          let replayCount = 0;
-          for (const captured of events) {
-            try {
-              buffer.append(captured.event);
-              aggregator.ingest(captured.event, captured.capturedAt);
-              // runsTracker / conversationProbe are intentionally NOT
-              // replayed here — runs persist their own JSONL (loaded
-              // on-demand by /runs handler) and conversations live in
-              // audit/conversations-*.jsonl which is loaded separately.
-              // Re-injecting them here would double-count.
-              replayCount += 1;
-            } catch {
-              // best-effort
+        const REPLAY_TAIL_LIMIT = 100_000;
+        const REPLAY_CHUNK = 1_000;
+        const replay = async (): Promise<void> => {
+          try {
+            const today = new Date().toISOString().slice(0, 10);
+            const all = jsonlStoreNow.readEventsForDay(today);
+            const events =
+              all.length > REPLAY_TAIL_LIMIT ? all.slice(-REPLAY_TAIL_LIMIT) : all;
+            const skipped = all.length - events.length;
+            let replayCount = 0;
+            for (let i = 0; i < events.length; i += REPLAY_CHUNK) {
+              const end = Math.min(i + REPLAY_CHUNK, events.length);
+              for (let j = i; j < end; j += 1) {
+                const captured = events[j];
+                if (!captured) continue;
+                try {
+                  buffer.append(captured.event);
+                  aggregator.ingest(captured.event, captured.capturedAt);
+                  // runsTracker / conversationProbe are intentionally NOT
+                  // replayed here — runs persist their own JSONL and
+                  // conversations live in audit/conversations-*.jsonl.
+                  // Re-injecting them here would double-count.
+                  replayCount += 1;
+                } catch {
+                  // best-effort per event
+                }
+              }
+              // Yield to the event loop between chunks so the gateway can
+              // serve health checks / handle other plugins' startup work
+              // while we backfill.
+              if (end < events.length) {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+              }
             }
-          }
-          if (replayCount > 0) {
-            ctx.logger?.info?.(
-              `[${PLUGIN_ID}] replayed ${replayCount} events from today's JSONL — channels / sources / models dimensions restored`,
+            if (replayCount > 0) {
+              const skippedNote =
+                skipped > 0 ? ` (skipped ${skipped} older events past tail limit)` : "";
+              ctx.logger?.info?.(
+                `[${PLUGIN_ID}] replayed ${replayCount} events from today's JSONL — channels / sources / models dimensions restored${skippedNote}`,
+              );
+            }
+          } catch (err) {
+            ctx.logger?.warn?.(
+              `[${PLUGIN_ID}] event replay failed (channels/sources start empty): ${String(err)}`,
             );
           }
-        } catch (err) {
-          ctx.logger?.warn?.(
-            `[${PLUGIN_ID}] event replay failed (channels/sources start empty): ${String(err)}`,
-          );
-        }
+        };
+        // Fire-and-forget. start() does not need to await for the gateway
+        // to be considered healthy — events arriving live during replay
+        // are interleaved correctly because both paths go through the
+        // same aggregator + buffer instances.
+        void replay();
       }
 
       fanout.start();

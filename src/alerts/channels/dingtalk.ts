@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { AlertNotification, DingTalkChannelConfig } from "../types.js";
+import { assertSafeChannelUrl } from "./url-guard.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -71,6 +72,9 @@ export async function sendDingTalk(
   config: DingTalkChannelConfig,
   payload: AlertNotification,
 ): Promise<void> {
+  assertSafeChannelUrl(config.url, {
+    ...(config.allowPrivateNetwork ? { allowPrivateNetwork: true } : {}),
+  });
   const url = config.secret ? signRequest(config.url, config.secret) : config.url;
   const { title, text } = renderMarkdown(payload);
   const body: Record<string, unknown> = {
