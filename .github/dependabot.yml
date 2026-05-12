@@ -1,0 +1,50 @@
+version: 2
+
+# Two npm ecosystems live in this repo: the plugin (/) and the dashboard
+# (/ui). Each gets its own update schedule. We deliberately keep most
+# updates as one-PR-per-dep so cross-major upgrades (e.g. vite 5→8,
+# vitest 2→4) don't land bundled with their tightly-coupled peer plugins
+# in a single PR that's impossible to verify atomically. The only group
+# we accept is @types/* since type-only bumps can't break runtime.
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    labels:
+      - "dependencies"
+      - "backend"
+    groups:
+      types:
+        patterns:
+          - "@types/*"
+
+  - package-ecosystem: "npm"
+    directory: "/ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    labels:
+      - "dependencies"
+      - "ui"
+    groups:
+      types:
+        patterns:
+          - "@types/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "ci"
