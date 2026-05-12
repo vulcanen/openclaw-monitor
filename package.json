@@ -1,12 +1,13 @@
 {
   "name": "@vulcanen/openclaw-monitor",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Self-contained real-time monitoring console for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",
   "files": [
     "dist",
-    "openclaw.plugin.json"
+    "openclaw.plugin.json",
+    "README.zh-CN.md"
   ],
   "scripts": {
     "build": "npm run build:plugin && npm run build:ui",
