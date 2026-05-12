@@ -8,3 +8,6 @@ coverage/
 *.tsbuildinfo
 .env
 .env.local
+
+# Claude Code session artifacts (per-developer)
+.claude/
