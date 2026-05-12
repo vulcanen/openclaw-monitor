@@ -301,7 +301,12 @@ export function createConversationProbe(): ConversationProbe {
     api.on("llm_input", (event, ctx) => {
       if (!state.config.enabled) return;
       const runId = event.runId ?? ctx.runId;
-      const sessionKey = event.sessionId ?? ctx.sessionKey;
+      // PluginHookLlmInputEvent has `sessionId` but NOT `sessionKey` — the
+      // session correlation key only exists on ctx. Don't read event.sessionId
+      // here; mixing it into the sessionKey namespace pollutes bySessionKey
+      // and breaks conversation grouping (the v0.6 regression decision #18
+      // warned about).
+      const sessionKey = ctx.sessionKey;
       if (!runId) return;
       const record = findOrCreateRecord(
         {
@@ -375,12 +380,23 @@ export function createConversationProbe(): ConversationProbe {
           ...(ctx.sessionKey !== undefined ? { sessionKey: ctx.sessionKey } : {}),
         },
         (record) => {
-          record.outbound = {
-            capturedAt: nowIso(),
-            success: event.success,
-            messages: messages.items,
-            truncated: messages.truncated,
-          };
+          // If message_sending already captured the actual reply that went
+          // back to the sender, preserve it — agent_end.messages is a
+          // snapshot of the *entire* conversation (system + user + every
+          // assistant turn), so writing it into the "OpenClaw → sender"
+          // slot would duplicate content the user already sees in the
+          // LLM-output section. Only fall back to messages array when no
+          // channel-side reply was captured.
+          if (record.outbound) {
+            record.outbound.success = event.success;
+          } else {
+            record.outbound = {
+              capturedAt: nowIso(),
+              success: event.success,
+              messages: messages.items,
+              truncated: messages.truncated,
+            };
+          }
           record.status = event.success ? "completed" : "error";
           if (event.error) record.errorMessage = event.error;
           if (typeof event.durationMs === "number") record.durationMs = event.durationMs;

@@ -181,8 +181,11 @@ export function createDailyCostStore(rootDir: string): DailyCostStore {
   const readDay: DailyCostStore["readDay"] = (day) => {
     const file = filePath(day);
     if (!fs.existsSync(file)) {
-      const cached = cache.get(day);
-      return cached?.cost ? cached : undefined;
+      // In-memory days before the 1s flush, OR providers with no pricing
+      // entry (tokens > 0 but cost === 0). Returning by truthiness of `cost`
+      // would drop legitimate token-only days; return the cached snapshot
+      // whenever it exists.
+      return cache.get(day);
     }
     return load(day);
   };

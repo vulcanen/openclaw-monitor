@@ -60,10 +60,27 @@ export function createPricingRef(initial: PricingConfig = DEFAULT_PRICING_CONFIG
  */
 type RunContextFields = { channelId?: string; trigger?: string };
 const RUN_CTX_TTL_MS = 60_000;
+// Outer safety-net TTL: if a run never reaches agent_end (host abort,
+// process crash mid-run, harness path that skips finalize) the run's
+// entry would otherwise stay in `ctxByRun` forever and slowly leak. Refresh
+// the timer on each `set()` so live runs aren't evicted prematurely; the
+// 30-minute window covers all practical real-runs while bounding the leak.
+const RUN_CTX_MAX_TTL_MS = 30 * 60_000;
 
 function makeRunContextRegistry() {
   const ctxByRun = new Map<string, RunContextFields>();
   const evictTimers = new Map<string, NodeJS.Timeout>();
+
+  const scheduleEvictAt = (runId: string, ttlMs: number): void => {
+    const prev = evictTimers.get(runId);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      ctxByRun.delete(runId);
+      evictTimers.delete(runId);
+    }, ttlMs);
+    timer.unref?.();
+    evictTimers.set(runId, timer);
+  };
 
   const set = (runId: string, fields: RunContextFields): void => {
     const existing = ctxByRun.get(runId) ?? {};
@@ -71,20 +88,14 @@ function makeRunContextRegistry() {
     if (fields.channelId !== undefined) merged.channelId = fields.channelId;
     if (fields.trigger !== undefined) merged.trigger = fields.trigger;
     ctxByRun.set(runId, merged);
-    const prev = evictTimers.get(runId);
-    if (prev) clearTimeout(prev);
-    evictTimers.delete(runId);
+    // Bound the entry's lifetime even for runs that never call
+    // scheduleEvict (agent_end). Refreshed on every set() so multi-turn
+    // runs keep the entry alive for as long as turns keep arriving.
+    scheduleEvictAt(runId, RUN_CTX_MAX_TTL_MS);
   };
 
   const scheduleEvict = (runId: string): void => {
-    const prev = evictTimers.get(runId);
-    if (prev) clearTimeout(prev);
-    const timer = setTimeout(() => {
-      ctxByRun.delete(runId);
-      evictTimers.delete(runId);
-    }, RUN_CTX_TTL_MS);
-    timer.unref?.();
-    evictTimers.set(runId, timer);
+    scheduleEvictAt(runId, RUN_CTX_TTL_MS);
   };
 
   const get = (runId: string | undefined): RunContextFields | undefined => {

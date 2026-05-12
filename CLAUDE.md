@@ -179,6 +179,44 @@
 
 32. **Insights 是 read-only 个案下钻，不持久化**（v0.9.0）：`src/insights/queries.ts` 用既有 buffer (ring per type, 默认 1024) + audit conversation store 算 top-N。不新建任何 ring / 文件 / index — 每次请求都重新 filter+sort buffer。window 上限 24h，limit 上限 50。下游路径 (Run Detail / Conversation Detail) 是稳定接口，可以直接 `<Link>` 跳。**不要**把 Insights 改成"自维护排行榜在 ingest 路径上算" —— 那会让 hot path 多一遍 sort overhead；现状是查询端开销，操作员 5s polling 一次完全够用。Heavy-conversations 路径合并内存 (`probe.recentCompleted`) + 磁盘 (`storeRef.list`)，跟 Conversations 页同口径。Error-clusters / Tool-failures 用 SAMPLE_RUN_IDS_PER_CLUSTER=5 保留示例 runIds（UI 点这些 link 跳 Run Detail）。windowSec 解析在 `src/insights/rest-routes.ts` 用 clampWindow / clampLimit 兜底非法值。
 
+33. **不要再次把 `event.sessionId` 当 `sessionKey` 用**（决策 #18 的孪生回归，已第二次修复）：`PluginHookLlmInputEvent`（host `hook-types.d.ts:48`）**只有** `sessionId: string`，**没有** `sessionKey`。任何 `const sessionKey = event.sessionId ?? ctx.sessionKey;` 都是 bug——`event.sessionId` 永远非空、`??` 永远走不到 ctx，且 sessionId 是 host 内部不透明 id（如 `chatcmpl_xxx`），跟 sessionKey（channel 关联键，如 `telegram:userN`）语义完全不同。后果：`state.bySessionKey` 被 sessionId 污染，conversation grouping 把多跳 LLM 调用拆成多条 _ungrouped。唯一正确写法：`const sessionKey = ctx.sessionKey;`（事件层根本没这个字段）。同类规则适用于所有"event 里没声明 sessionKey"的 hook：`llm_output` (`hook-types.d.ts:79`) / `agent_end` (line 107) 都只有 sessionId，sessionKey 只能从 ctx 取。回归测试 `service.test.ts > "llm_input does not pollute sessionKey with sessionId"`。
+
+34. **`agent_end.messages` 是完整对话快照，不是 outbound 回复**（v0.9.3 修复）：host `PluginHookAgentEndEvent.messages` 字段包含 system / user / assistant 全部消息（agent 流程结束时的完整 conversation state）。把它直接写进 `record.outbound.messages` 会让 ConversationDetail 第 ④ 段（"OpenClaw → 消息发送方"）显示**整段 LLM 输出 + system prompt + user 提问**，重复第 ③ 段内容并污染。`message_sending` hook 才是真正的"发回给消息发送方"信号（含单条 assistant 回复 + to/replyToId）。`src/audit/conversation-probe.ts` agent_end finalize **必须**：(a) 已有 outbound（说明 message_sending 写过干净版本）→ 只更新 success/status/error/durationMs，**不要覆盖 messages**；(b) 无 outbound（纯 direct-API 流程，没 channel hook）→ 才回退到 messages 数组。回归测试 `service.test.ts > "agent_end preserves outbound captured by message_sending"`。
+
+35. **对话详情段名一律用"消息发送方"，不是"项目"**（v0.9.3）：插件是公开 npm 包，消息源不一定来自"项目"（可能是 Telegram / Discord / Control UI / OpenAI compat API client）。`ui/src/i18n/{zh,en}.ts` 的 conversationDetail.section.* 用 "消息发送方 → OpenClaw / OpenClaw → 消息发送方"（zh）/ "sender → OpenClaw / OpenClaw → sender"（en）。任何 UI 重构都不要回退到"项目 → OpenClaw"措辞。
+
+36. **`url-guard` 不能只用字符串 regex 挡 IPv6 嵌入 IPv4**（v0.9.3 SSRF 修复）：WHATWG URL parser 把 `[::ffff:127.0.0.1]` 归一化成 `[::ffff:7f00:1]`、`[::127.0.0.1]` 归一成 `[::7f00:1]` —— dotted-quad 形式从 `.hostname` 完全消失。`/^127\./` / `/^10\./` 这些 IPv4 模式全部 miss。**正确做法**：`src/alerts/channels/url-guard.ts: embeddedIPv4(host)` 用 `node:net.isIPv6` 验证后，根据 `::ffff:` / `::` 前缀提取后 32 bit 还原 IPv4 dotted-quad，再用 `LITERAL_PRIVATE_HOST` 重新跑一遍。任何后续往 LITERAL_PRIVATE_HOST 加 IPv6 模式都是徒劳（hostname 已被归一化），扩展逻辑必须改 embeddedIPv4。回归测试 `service.test.ts > "url-guard rejects IPv6-mapped IPv4 loopback"`。
+
+37. **告警 engine 的 setInterval 必须自带 reentrancy 闸门**（v0.9.3）：`src/alerts/engine.ts: start()` 的 setInterval 回调不会因为前一次 `evaluate()` 的 Promise 没 resolve 就跳过 —— 在多 rule × 多 channel × 10s timeout 的极端情况下两次 tick 可能并发执行，同时看到 `activeByRuleId.get(ruleId) === undefined`，对同一规则各发一份 "fired" 通知（违反 cooldown）。闸门变量 `let evaluating = false;` 在 setInterval 回调开头检查 / 设置，`.finally` 复位。**不要**改成"每 tick 异步 fire-and-forget evaluate 多次"——既绕开 cooldown 又会让 history ring 重复 push。
+
+38. **`daily-store.readDay` 不能用 `cost` truthy 过滤 cached snapshot**（v0.9.3）：`cached?.cost ? cached : undefined` 会把 cost===0 但 tokens>0 的合法 day 丢成 undefined。两种触发：(a) 1 秒未 flush 窗口内的初始事件；(b) 走兜底 0 价格的 provider（决策 #29："对真没价格表 / 真不发 usage 的极端 provider 还是兜底"）。正确：`return cache.get(day);`，文件不存在时只判 cached 是否存在，不要再判 cost 字段。回归测试 `service.test.ts > "daily-cost readDay returns cached day when cost is 0 but tokens exist"`。
+
+39. **`hook-metrics` runCtx 注册表必须有外层 max-TTL**（v0.9.3）：`src/probes/hook-metrics.ts: makeRunContextRegistry` 之前只在 `agent_end` 调 `scheduleEvict`（60s TTL）。任何走到 `agent_turn_prepare` 但**没走完** `agent_end` 的 run（host abort / crash mid-run / harness 路径绕过 finalize）会让 `ctxByRun` 条目永久驻留，每条 ~100 字节，慢但无上界的内存泄漏。修复：`set()` 内部用 `RUN_CTX_MAX_TTL_MS = 30 * 60_000` 作为兜底；正常 agent_end 路径再覆盖到 60s 短 TTL。30 分钟覆盖所有"实际有意义的 run"时长，不会误删多 turn 的活 run（因为每次 turn 的 set() 都会刷新 timer）。
+
+40. **每 48 小时检查上游 OpenClaw 有没有新正式版**（v0.9.3 加入工作流约束）：
+    - **当前 baseline**：`package.json -> devDependencies.openclaw` 与 `openclaw.plugin.json -> openclaw.install.minHostVersion` / `openclaw.compat.pluginApi` 必须三处对齐到同一个 stable tag（当前 `2026.5.7`）。任何升级都得三处一起改。
+    - **检查状态文件**：repo 根目录 `openclaw-version-check.json` 是单一真源，记录 `lastCheckedAt` / `latestStableObserved` / `assessment`。
+    - **每次新对话开始**：读 `openclaw-version-check.json`，若 `lastCheckedAt` 距今 ≥ 48h（用 `currentDate` 系统时间判断），跑一次检查；否则跳过。**不要每 turn 都查**——只在新对话的第一个相关时机。
+    - **检查脚本**（gh 不可用时用 curl，无需鉴权，公开 repo）：
+      ```bash
+      curl -s -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/openclaw/openclaw/releases?per_page=30" \
+        > /tmp/oc-releases.json
+      python3 -c '
+      import json
+      with open("/tmp/oc-releases.json") as f:
+          data = json.load(f)
+      stables = [r for r in data if not r.get("prerelease") and not r.get("draft")]
+      if stables:
+          latest = stables[0]
+          print(latest["tag_name"], latest["published_at"], latest["html_url"])
+      '
+      ```
+    - **判定与评估**：只看 stable（`prerelease=false && draft=false`），完全忽略 `*-beta.*` / `*-rc.*` / `*-alpha.*`。若最新 stable tag > baseline：WebFetch release notes，重点检查 SDK 变化——`hook-types.d.ts` 新 / 改 / 删的 hook、`PluginHookXxxEvent` schema 字段、`@openclaw/plugin-sdk/*` 子路径导出、`OpenClawPluginApi` 公开方法、host 安全门（`allowConversationAccess` 等）、HTTP 路由 auth 模式。逐项判断对本插件的影响。
+    - **回写状态**：把当次 `lastCheckedAt` 写成 ISO 时间戳，`latestStableObserved` 写最新 tag，`assessment` 用枚举 `no-action` / `review-pending` / `upgrade-recommended`，`assessmentNotes` 写一两句决策依据。
+    - **绝对不要自动改版本号**：升级 `package.json` / `openclaw.plugin.json` 的 baseline 是有意决策，需要用户 explicit 授权，仅做"评估 + 报告"。
+    - **报告口径**：一句话告诉用户（"已是最新" / "有新 stable，影响评估：xxx"），**不要**把整篇 release notes 复述回对话——长度 + 信号比太差。详情让用户自己点 URL。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：

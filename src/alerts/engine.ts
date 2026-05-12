@@ -67,6 +67,13 @@ export function createAlertEngine(params: {
    */
   const activeByRuleId = new Map<string, ActiveAlert>();
   let timer: NodeJS.Timeout | undefined;
+  // Reentrancy guard: setInterval does NOT skip a tick when the previous
+  // callback's promise is still pending. With many rules × many channels ×
+  // 10s per-channel timeout a single evaluation can exceed
+  // `evaluationIntervalSec`, and two ticks would otherwise race over the
+  // shared `activeByRuleId` Map — both seeing `previous=undefined` and both
+  // sending "fired" notifications. Skip overlapping ticks instead.
+  let evaluating = false;
 
   const evaluate = async (): Promise<void> => {
     if (!config.enabled) return;
@@ -205,9 +212,15 @@ export function createAlertEngine(params: {
       if (timer) return;
       const intervalMs = Math.max(5, config.evaluationIntervalSec) * 1000;
       timer = setInterval(() => {
-        evaluate().catch((err) => {
-          params.logger?.warn?.(`[alerts] evaluate failed: ${String(err)}`);
-        });
+        if (evaluating) return; // previous tick still running — skip
+        evaluating = true;
+        evaluate()
+          .catch((err) => {
+            params.logger?.warn?.(`[alerts] evaluate failed: ${String(err)}`);
+          })
+          .finally(() => {
+            evaluating = false;
+          });
       }, intervalMs);
       timer.unref?.();
       params.logger?.info?.(

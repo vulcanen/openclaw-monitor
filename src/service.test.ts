@@ -847,6 +847,126 @@ describe("conversation probe", () => {
     expect(completed[0]?.llmInputs).toHaveLength(1);
   });
 
+  it("llm_input does not pollute sessionKey with sessionId (decision #18 regression guard)", async () => {
+    // PluginHookLlmInputEvent has only `sessionId`, not `sessionKey`. The
+    // previous bug read event.sessionId into a variable named `sessionKey`,
+    // which corrupted state.bySessionKey and broke conversation grouping.
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    probe.setConfig({
+      enabled: true,
+      contentMaxBytes: 16384,
+      retainDays: 3,
+      captureSystemPrompt: false,
+    });
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers) as never);
+
+    // Channel msg arrives first with the *real* sessionKey
+    handlers["message_received"]?.(
+      { from: "user", content: "hello", sessionKey: "real-session-key" },
+      { channelId: "ctrl", sessionKey: "real-session-key" },
+    );
+    // llm_input fires with sessionId that is DIFFERENT from sessionKey
+    handlers["llm_input"]?.(
+      {
+        runId: "rk",
+        sessionId: "OPAQUE_INTERNAL_ID_NOT_EQUAL_TO_SESSION_KEY",
+        provider: "openai",
+        model: "gpt-4",
+        prompt: "hello",
+        historyMessages: [],
+        imagesCount: 0,
+      },
+      { runId: "rk", sessionKey: "real-session-key" },
+    );
+    handlers["agent_end"]?.(
+      { runId: "rk", messages: [], success: true },
+      { runId: "rk", sessionKey: "real-session-key" },
+    );
+
+    const completed = probe.recentCompleted();
+    expect(completed).toHaveLength(1);
+    // The persisted record's sessionKey must be the real key, not the
+    // opaque sessionId from the event.
+    expect(completed[0]?.sessionKey).toBe("real-session-key");
+  });
+
+  it("agent_end preserves outbound captured by message_sending (no LLM-output duplication)", async () => {
+    // Bug fix: agent_end used to unconditionally overwrite record.outbound
+    // with the full conversation snapshot, duplicating LLM-output content
+    // into the OpenClaw→sender section. Now agent_end keeps the cleaner
+    // message_sending reply and just updates success/status/durationMs.
+    const { createConversationProbe } = await import("./audit/conversation-probe.js");
+    const probe = createConversationProbe();
+    probe.setConfig({
+      enabled: true,
+      contentMaxBytes: 16384,
+      retainDays: 3,
+      captureSystemPrompt: false,
+    });
+    const handlers: CapturedHandlers = {};
+    probe.installHooks(makeFakeApi(handlers) as never);
+
+    handlers["message_received"]?.(
+      { from: "u", content: "ask", sessionKey: "sX" },
+      { channelId: "ctrl", sessionKey: "sX" },
+    );
+    handlers["before_prompt_build"]?.(
+      { prompt: "ask", messages: [] },
+      { runId: "rX", sessionKey: "sX" },
+    );
+    handlers["llm_input"]?.(
+      {
+        runId: "rX",
+        sessionId: "sid",
+        provider: "openai",
+        model: "gpt-4",
+        prompt: "ask",
+        historyMessages: [],
+        imagesCount: 0,
+      },
+      { runId: "rX", sessionKey: "sX" },
+    );
+    handlers["llm_output"]?.(
+      {
+        runId: "rX",
+        sessionId: "sid",
+        provider: "openai",
+        model: "gpt-4",
+        assistantTexts: ["FINAL_REPLY"],
+      },
+      { runId: "rX", sessionKey: "sX" },
+    );
+    handlers["message_sending"]?.(
+      { content: "FINAL_REPLY", to: "u" },
+      { runId: "rX", sessionKey: "sX" },
+    );
+    // agent_end fires AFTER message_sending and should NOT replace the
+    // outbound payload with the full messages snapshot.
+    handlers["agent_end"]?.(
+      {
+        runId: "rX",
+        messages: [
+          { role: "system", content: "secret system prompt" },
+          { role: "user", content: "ask" },
+          { role: "assistant", content: "FINAL_REPLY" },
+        ],
+        success: true,
+        durationMs: 99,
+      },
+      { runId: "rX", sessionKey: "sX" },
+    );
+
+    const completed = probe.recentCompleted();
+    expect(completed).toHaveLength(1);
+    const rec = completed[0];
+    expect(rec?.outbound?.messages).toHaveLength(1);
+    expect((rec?.outbound?.messages[0] as { content?: string })?.content).toBe("FINAL_REPLY");
+    expect(rec?.status).toBe("completed");
+    expect(rec?.durationMs).toBe(99);
+  });
+
   it("persists a completed conversation to the store", async () => {
     const { createConversationProbe } = await import("./audit/conversation-probe.js");
     const { createConversationStore } = await import("./audit/conversation-store.js");
@@ -1048,6 +1168,31 @@ describe("alert engine (v0.7)", () => {
     }
   });
 
+  it("url-guard rejects IPv6-mapped IPv4 loopback (SSRF bypass fix)", async () => {
+    // Bug fix: literal regex list previously missed `::ffff:x.x.x.x` which
+    // WHATWG URL parsers do NOT normalize back to dotted-quad. Without an
+    // explicit pattern http://[::ffff:127.0.0.1]/ bypassed the IPv4 rules.
+    const { assertSafeChannelUrl } = await import("./alerts/channels/url-guard.js");
+    for (const bad of [
+      "http://[::ffff:127.0.0.1]/hook",
+      "http://[::ffff:10.0.0.1]/hook",
+      "http://[::ffff:169.254.169.254]/latest/meta-data",
+      "http://[::127.0.0.1]/hook", // IPv4-compatible IPv6
+    ]) {
+      let thrown: unknown;
+      try {
+        assertSafeChannelUrl(bad);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown, `expected ${bad} to be rejected`).toBeDefined();
+    }
+    // opt-in still works
+    expect(() =>
+      assertSafeChannelUrl("http://[::ffff:127.0.0.1]/hook", { allowPrivateNetwork: true }),
+    ).not.toThrow();
+  });
+
   it("dingtalk channel signs the request when a secret is configured", async () => {
     const { __testing } = await import("./alerts/channels/dingtalk.js");
     const url = "https://oapi.dingtalk.com/robot/send?access_token=abc";
@@ -1148,6 +1293,41 @@ describe("cost engine (v0.8)", () => {
     expect(channels[0]?.cost).toBeCloseTo(0.0015, 6);
     expect(sources[0]?.key).toBe("openai-api");
     expect(sources[0]?.cost).toBeCloseTo(0.0015, 6);
+  });
+
+  it("daily-cost readDay returns cached day when cost is 0 but tokens exist", async () => {
+    // Bug fix: readDay previously returned undefined when cached.cost was
+    // falsy, dropping legitimate token-only days (providers without a
+    // pricing entry, or the 1-second pre-flush window).
+    const { createDailyCostStore } = await import("./costs/daily-store.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cost-zero-"));
+    try {
+      const store = createDailyCostStore(dir);
+      const ts = Date.UTC(2026, 4, 13);
+      store.recordTokenEvent({
+        type: "llm.tokens.recorded",
+        provider: "p",
+        model: "m",
+        inputTokens: 100,
+        outputTokens: 50,
+        costInput: 0,
+        costOutput: 0,
+        costCacheRead: 0,
+        costCacheWrite: 0,
+        cost: 0, // unknown pricing → 0 cost but tokens > 0
+        currency: "CNY",
+        ts,
+      });
+      // Do NOT flush — exercise the cache-only readDay path.
+      const today = store.readDay("2026-05-13");
+      expect(today).toBeDefined();
+      expect(today?.cost).toBe(0);
+      expect(today?.tokensIn).toBe(100);
+      expect(today?.tokensOut).toBe(50);
+      store.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("daily-cost store persists across reopen + rangeSum sums day range", async () => {
