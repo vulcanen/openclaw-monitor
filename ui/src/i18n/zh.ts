@@ -90,9 +90,9 @@ export const zh = {
   "costs.notice.noPricing": "已记录 token，但价格表为空，成本全部为 0",
   "costs.notice.noPricingHint":
     "在 ~/.openclaw/openclaw.json 的 plugins.entries.openclaw-monitor.config.pricing.models 里加你用到的 provider/model 价格 (per 1k tokens)，重启 gateway 后会生效。",
-  "costs.notice.noTokens": "Token 数据为 0：上游 provider 未在响应里返回 usage 字段",
+  "costs.notice.noTokens": "Token 数据为 0：请先在 model 配置加 compat.supportsUsageInStreaming: true",
   "costs.notice.noTokensHint":
-    "成本依赖 llm_output hook 提供的 usage（input/output/cacheRead/cacheWrite）。如果上游 LLM provider 在 OpenAI 兼容响应里不带 usage（部分自建网关、代理或模型会忽略），Costs 页会一直显示 0。确认上游响应的 usage 字段是否非零；如果是代理网关，可能要在代理那边加上 usage 透传。",
+    "OpenClaw host 对未知 baseUrl 的 OpenAI-compat provider 默认认为不支持流式 usage（host: src/plugins/provider-model-compat.ts），会丢弃上游返回的 usage 帧。修复：在 ~/.openclaw/openclaw.json 的 models.providers.<id>.models[*] 里加 \"compat\": { \"supportsUsageInStreaming\": true } 后重启 gateway。详见 README 的「自建 LLM 上游的已知配置注意点」。如果加了仍为 0，再排查上游是否真的返回 usage（curl 直连上游 + stream_options.include_usage:true 验证）。",
 
 
   // Alerts (v0.7.0+)
