@@ -29,10 +29,11 @@ export function TokenGate({ children }: { children: ReactNode }) {
             {t("action.langSwitch")}
           </button>
         </div>
-        <h1>{t("tokenGate.title")}</h1>
+        <h1 id="token-gate-title">{t("tokenGate.title")}</h1>
         <p className="token-gate-lead">{t("tokenGate.lead")}</p>
         <p className="token-gate-help">{t("tokenGate.help")}</p>
         <form
+          aria-labelledby="token-gate-title"
           onSubmit={(e) => {
             e.preventDefault();
             const form = e.currentTarget as HTMLFormElement;
@@ -47,19 +48,30 @@ export function TokenGate({ children }: { children: ReactNode }) {
             setHasToken(true);
           }}
         >
+          <label htmlFor="gateway-token" className="sr-only">
+            {t("tokenGate.inputLabel")}
+          </label>
           <input
+            id="gateway-token"
             name="token"
-            type="password"
+            type="text"
             autoComplete="off"
             autoFocus
             placeholder={t("tokenGate.placeholder")}
+            aria-label={t("tokenGate.inputLabel")}
+            aria-describedby={error ? "token-gate-error" : undefined}
+            aria-invalid={error ? true : undefined}
             spellCheck={false}
           />
           <button type="submit" className="primary">
             {t("tokenGate.submit")}
           </button>
         </form>
-        {error ? <div className="token-gate-error">{error}</div> : null}
+        {error ? (
+          <div className="token-gate-error" id="token-gate-error" role="alert">
+            {error}
+          </div>
+        ) : null}
       </div>
     </div>
   );

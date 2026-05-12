@@ -36,6 +36,7 @@ export const en: Strings = {
     "Paste your OpenClaw gateway operator token to access this dashboard. The token is stored only in your browser localStorage and added as Authorization: Bearer … to every API call from this page.",
   "tokenGate.help": "Find the token with: `openclaw config get gateway.auth.token`",
   "tokenGate.placeholder": "paste gateway token here",
+  "tokenGate.inputLabel": "Gateway operator token",
   "tokenGate.submit": "unlock dashboard",
   "tokenGate.emptyError": "token cannot be empty",
   "tokenGate.rejectedError": "token rejected (401) — please re-enter",

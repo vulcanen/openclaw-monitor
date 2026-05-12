@@ -60,6 +60,12 @@ function summarize(record: ConversationRecord): ConversationSummary {
   return {
     runId: record.runId,
     ...(record.sessionId !== undefined ? { sessionId: record.sessionId } : {}),
+    // sessionKey is load-bearing for the Conversations page's
+    // groupBy=sessionKey path. Without it the UI groups every
+    // persisted record under the "_ungrouped" bucket. Mirror the same
+    // forwarding that conversation-routes.ts:summarizeRuntime does for
+    // in-memory records.
+    ...(record.sessionKey !== undefined ? { sessionKey: record.sessionKey } : {}),
     ...(record.channelId !== undefined ? { channelId: record.channelId } : {}),
     ...(record.trigger !== undefined ? { trigger: record.trigger } : {}),
     status: record.status,
