@@ -156,6 +156,12 @@
 
 29. **Token 数据有 provider 依赖，不在我们可控范围内**（v0.8.0 已知限制）：cost 计算 100% 依赖 `llm_output` hook 的 `event.usage`。host 这个 hook 何时 fire 取决于代码路径 + provider response 是否带 usage（OpenAI compat 响应里的 `usage: {prompt_tokens, completion_tokens, total_tokens}`）。实测某些自建 / 代理 OpenAI compat 网关（比如本仓库测试用的 qwen 上游 `your-llm-endpoint.example.com`）**完全不返回 usage**（response 里全是 0），host 也就不解析、不 fire 完整的 llm_output 带 usage 块。这种情况下 Costs 页会一直显示 0 —— 不是 bug，是**采集源**的物理限制。Costs UI 已加 detection：所有 byModel.tokensIn === 0 但 calls > 0 时弹"上游不返回 usage"banner。**不要**改成"prompt char count / 4 估算"绕开 —— 估算精度对 cost 来说太差，会给运营错误信号；要修就推上游 provider 加 usage 透传，或者换一个会返回 usage 的 provider/上游。
 
+30. **`webchat` 是 host 的 INTERNAL_MESSAGE_CHANNEL 常量，不是浏览器聊天**（v0.8.3 + v0.8.4 改进）：OpenClaw `src/utils/message-channel-constants.ts:1` 把字符串 "webchat" 当作"所有非 channel-plugin 入口"的统一标识，覆盖：`/v1/chat/completions`、Control UI 内置聊天、heartbeat / cron / webhook 内部触发。**channel 字段单独无法区分这些路径**。要区分必须用：(a) runId 前缀：`chatcmpl_*` = OpenAI compat（host `openai-http.ts` 构造），`ctrl_*` = Control UI（host `server-chat.ts` 构造）；(b) trigger：`channel-message` = audit 路径（conversation-probe 合成），`user/heartbeat/cron/webhook` = host 设的。Host 实测**对 OpenAI compat 和 Control UI 都设 trigger=user**，所以**只靠 trigger 区分不可靠**，必须 runId 优先。共享逻辑：backend `src/pipeline/extractors.ts: extractSource`，UI `ui/src/entry-label.ts: inferEntryKey + friendlyEntryLabel`。**不要**让两个地方分别维护推断逻辑 — 始终走 ui/src/entry-label.ts 这个共享 helper。
+
+31. **Channels 页几乎没有信息密度，因为 host 都标 webchat**（v0.8.4 调整）：channels 维度按 host 的 channel 字段聚合，OpenClaw 默认配置下永远只有 "webchat" 一行。监控插件已经在 Channels 页加了 host 行为解释 hint，并把上面那张 "messages.delivered" 趋势图换成了 "model.calls"（消息送达事件 trusted 且 hook 也很少 fire，永远空，换成有数据的）。**真正的运维使用场景是 Sources 页**（按 entry path 拆分）。改 Channels 时不要再加 messages 相关的 chart / 计数 —— 那些 metric 在外部插件视角下只能拿到很少甚至 0 数据。
+
+32. **Insights 是 read-only 个案下钻，不持久化**（v0.9.0）：`src/insights/queries.ts` 用既有 buffer (ring per type, 默认 1024) + audit conversation store 算 top-N。不新建任何 ring / 文件 / index — 每次请求都重新 filter+sort buffer。window 上限 24h，limit 上限 50。下游路径 (Run Detail / Conversation Detail) 是稳定接口，可以直接 `<Link>` 跳。**不要**把 Insights 改成"自维护排行榜在 ingest 路径上算" —— 那会让 hot path 多一遍 sort overhead；现状是查询端开销，操作员 5s polling 一次完全够用。Heavy-conversations 路径合并内存 (`probe.recentCompleted`) + 磁盘 (`storeRef.list`)，跟 Conversations 页同口径。Error-clusters / Tool-failures 用 SAMPLE_RUN_IDS_PER_CLUSTER=5 保留示例 runIds（UI 点这些 link 跳 Run Detail）。windowSec 解析在 `src/insights/rest-routes.ts` 用 clampWindow / clampLimit 兜底非法值。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：

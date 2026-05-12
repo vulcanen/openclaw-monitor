@@ -12,6 +12,7 @@ const NAV_ITEMS: Array<{ to: string; key: StringKey }> = [
   { to: "/models", key: "nav.models" },
   { to: "/tools", key: "nav.tools" },
   { to: "/runs", key: "nav.runs" },
+  { to: "/insights", key: "nav.insights" },
   { to: "/conversations", key: "nav.conversations" },
   { to: "/costs", key: "nav.costs" },
   { to: "/logs", key: "nav.logs" },

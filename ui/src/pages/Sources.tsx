@@ -1,11 +1,20 @@
-import { api } from "../api.js";
+import { api, type DimensionRow } from "../api.js";
 import { DimensionTable } from "../components/DimensionTable.js";
+import { friendlyEntryLabel } from "../entry-label.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
 
 export function Sources() {
   const { t } = useI18n();
   const { data, error } = usePolling(api.sources, 5_000);
+
+  // Same friendly-label translation as Channels.tsx — the backend keeps
+  // stable technical ids ("openai-api" / "control-ui" / "channel:name")
+  // for API consumers; we humanise them here for display only.
+  const translatedRows: DimensionRow[] = (data?.rows ?? []).map((r) => ({
+    ...r,
+    key: friendlyEntryLabel(t, r.key),
+  }));
 
   return (
     <div>
@@ -23,21 +32,15 @@ export function Sources() {
           </thead>
           <tbody>
             <tr>
-              <td>
-                <code>openai-api</code>
-              </td>
+              <td>{t("entryLabel.openaiApi")}</td>
               <td>{t("sources.legend.openaiApi")}</td>
             </tr>
             <tr>
-              <td>
-                <code>control-ui</code>
-              </td>
+              <td>{t("entryLabel.controlUi")}</td>
               <td>{t("sources.legend.controlUi")}</td>
             </tr>
             <tr>
-              <td>
-                <code>channel:&lt;name&gt;</code>
-              </td>
+              <td>{t("entryLabel.channelPlugin", { name: "&lt;name&gt;" })}</td>
               <td>{t("sources.legend.channelPlugin")}</td>
             </tr>
           </tbody>
@@ -51,7 +54,7 @@ export function Sources() {
         ) : !data ? (
           <div className="empty">{t("common.loading")}</div>
         ) : (
-          <DimensionTable rows={data.rows} keyLabel={t("sources.col.source")} showTokens />
+          <DimensionTable rows={translatedRows} keyLabel={t("sources.col.source")} showTokens />
         )}
       </div>
     </div>

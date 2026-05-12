@@ -12,6 +12,44 @@ export const en: Strings = {
   "nav.logs": "Logs",
   "nav.alerts": "Alerts",
   "nav.costs": "Costs",
+  "nav.insights": "Insights",
+
+  // Insights (v0.9.0+)
+  "insights.title": "Insights / Top-N",
+  "insights.subtitle": "Turns rolled-up metrics into clickable individuals — slowest / heaviest / most error-prone / flakiest. Each row links into the Run Detail page.",
+  "insights.window.label": "window",
+  "insights.window.15m": "last 15 min",
+  "insights.window.1h": "last 1 hour",
+  "insights.window.6h": "last 6 hours",
+  "insights.window.24h": "last 24 hours",
+  "insights.section.slow": "slowest model.call.completed",
+  "insights.section.heavy": "top conversations by token usage",
+  "insights.section.errors": "error clusters (by provider × model × errorCategory)",
+  "insights.section.toolFailures": "tool failure rate top-N",
+  "insights.empty.slow": "no model.call.completed events in window",
+  "insights.empty.heavy": "no conversation records in window",
+  "insights.empty.errors": "no model.call.error in window",
+  "insights.empty.toolFailures": "no tool failures in window",
+  "insights.col.duration": "duration",
+  "insights.col.providerModel": "provider / model",
+  "insights.col.channel": "channel",
+  "insights.col.respBytes": "resp bytes",
+  "insights.col.when": "when",
+  "insights.col.runId": "runId",
+  "insights.col.tokensTotal": "total tokens",
+  "insights.col.tokensIn": "in",
+  "insights.col.tokensOut": "out",
+  "insights.col.hops": "LLM hops",
+  "insights.col.session": "session",
+  "insights.col.count": "count",
+  "insights.col.errorCategory": "category",
+  "insights.col.lastSeen": "last seen",
+  "insights.col.sampleRuns": "sample runIds",
+  "insights.col.tool": "tool",
+  "insights.col.errors": "errors",
+  "insights.col.total": "total",
+  "insights.col.errorRate": "error rate",
+  "insights.col.lastFailureAt": "last failure",
 
   // Pagination
   "pagination.range": "{start}–{end} of {total}",
@@ -19,6 +57,14 @@ export const en: Strings = {
   "pagination.pageOf": "page {page} / {total}",
   "pagination.prev": "prev",
   "pagination.next": "next",
+
+  // Entry label — friendly translation of raw "webchat" / "openai-api" etc.
+  "entryLabel.openaiApi": "OpenAI-compat API",
+  "entryLabel.controlUi": "Control UI",
+  "entryLabel.webchatGeneric": "OpenClaw internal entry",
+  "entryLabel.webchatWithTrigger": "OpenClaw internal · {trigger}",
+  "entryLabel.internalWithTrigger": "Internal trigger · {trigger}",
+  "entryLabel.channelPlugin": "Channel: {name}",
 
   // Costs (v0.8.0+)
   "costs.title": "Costs / Token Economics",
@@ -154,8 +200,11 @@ export const en: Strings = {
 
   // Channels
   "channels.title": "Channels",
-  "channels.subtitle": "message delivery health by channel",
+  "channels.subtitle": "Aggregated by the host's `channel` field. OpenClaw stamps every internal entry as `webchat`, so the Sources page is where OpenAI API / Control UI / etc are broken apart.",
   "channels.rollup": "per-channel rollup",
+  "channels.chartTitle": "model calls · last 15m",
+  "channels.hostHint":
+    "OpenClaw's INTERNAL_MESSAGE_CHANNEL constant is `\"webchat\"` — it covers /v1/chat/completions, the Control UI built-in chat, heartbeat / cron triggers, every non-channel-plugin entry. Go to Sources to split by actual entry path.",
 
   // Models
   "models.title": "Models",

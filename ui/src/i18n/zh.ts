@@ -10,6 +10,44 @@ export const zh = {
   "nav.logs": "日志",
   "nav.alerts": "告警",
   "nav.costs": "成本",
+  "nav.insights": "诊断",
+
+  // Insights (v0.9.0+)
+  "insights.title": "诊断 / Top-N",
+  "insights.subtitle": "把统计指标变成可下钻的个案 — 最慢 / 最贵 / 最易错 / 最不稳的入口直接列出 + 跳转 Run Detail。",
+  "insights.window.label": "时间窗",
+  "insights.window.15m": "近 15 分钟",
+  "insights.window.1h": "近 1 小时",
+  "insights.window.6h": "近 6 小时",
+  "insights.window.24h": "近 24 小时",
+  "insights.section.slow": "最慢的 model.call.completed",
+  "insights.section.heavy": "Token 消耗 Top-N 对话",
+  "insights.section.errors": "错误聚类（按 provider × model × errorCategory）",
+  "insights.section.toolFailures": "工具失败率 Top-N",
+  "insights.empty.slow": "时间窗内没有 model.call.completed 事件",
+  "insights.empty.heavy": "时间窗内没有对话记录",
+  "insights.empty.errors": "时间窗内没有 model.call.error",
+  "insights.empty.toolFailures": "时间窗内没有工具失败",
+  "insights.col.duration": "耗时",
+  "insights.col.providerModel": "provider / model",
+  "insights.col.channel": "channel",
+  "insights.col.respBytes": "响应字节",
+  "insights.col.when": "发生于",
+  "insights.col.runId": "runId",
+  "insights.col.tokensTotal": "总 token",
+  "insights.col.tokensIn": "输入",
+  "insights.col.tokensOut": "输出",
+  "insights.col.hops": "LLM 跳数",
+  "insights.col.session": "session",
+  "insights.col.count": "次数",
+  "insights.col.errorCategory": "错误类别",
+  "insights.col.lastSeen": "最近一次",
+  "insights.col.sampleRuns": "示例 runId",
+  "insights.col.tool": "工具",
+  "insights.col.errors": "失败",
+  "insights.col.total": "总数",
+  "insights.col.errorRate": "失败率",
+  "insights.col.lastFailureAt": "最近失败",
 
   // Pagination
   "pagination.range": "第 {start}–{end} 条 / 共 {total} 条",
@@ -17,6 +55,16 @@ export const zh = {
   "pagination.pageOf": "第 {page} / {total} 页",
   "pagination.prev": "上一页",
   "pagination.next": "下一页",
+
+  // Entry label — applied wherever a raw "webchat" / "openai-api" etc id
+  // shows up. Helps operators see "OpenAI API" rather than the host's
+  // literal field value.
+  "entryLabel.openaiApi": "OpenAI 兼容 API",
+  "entryLabel.controlUi": "Control UI",
+  "entryLabel.webchatGeneric": "OpenClaw 内部入口",
+  "entryLabel.webchatWithTrigger": "OpenClaw 内部 · {trigger}",
+  "entryLabel.internalWithTrigger": "内部触发 · {trigger}",
+  "entryLabel.channelPlugin": "Channel: {name}",
 
   // Costs (v0.8.0+)
   "costs.title": "成本 / Token 经济学",
@@ -151,8 +199,11 @@ export const zh = {
 
   // Channels
   "channels.title": "通道",
-  "channels.subtitle": "按通道汇总的消息送达健康度",
+  "channels.subtitle": "host 设的 channel 字段聚合（OpenClaw 把所有内部入口都标为 webchat — 看「来源」页可看到 OpenAI API / Control UI 等更细的拆分）",
   "channels.rollup": "通道维度统计",
+  "channels.chartTitle": "近 15m 模型调用趋势",
+  "channels.hostHint":
+    "OpenClaw 的 INTERNAL_MESSAGE_CHANNEL 常量是 \"webchat\"，覆盖 /v1/chat/completions、Control UI、heartbeat / cron 等所有非 channel-plugin 入口。要按入口路径拆分请看「来源」页。",
 
   // Models
   "models.title": "模型",

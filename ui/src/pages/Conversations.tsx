@@ -2,48 +2,9 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type ConversationSummary, type SessionGroup } from "../api.js";
 import { Pagination } from "../components/Pagination.js";
+import { friendlyEntryLabel, inferEntryKey } from "../entry-label.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
-
-/**
- * Infer a human-meaningful entry-path label from the raw host fields.
- *
- * Background: OpenClaw's INTERNAL_MESSAGE_CHANNEL constant is literally
- * the string "webchat" — the host stamps that on **every** non-channel-
- * plugin entry, including `/v1/chat/completions`, the Control UI built-
- * in chat, heartbeat-triggered runs, etc. So `channelId === "webchat"`
- * by itself doesn't tell an operator which front door this conversation
- * came through.
- *
- * We disambiguate using two stable hints:
- *   - runId prefix:
- *       "chatcmpl_*" → OpenAI-compat HTTP (built by openai-http.ts)
- *       "ctrl_*"     → Control UI (built by server-chat.ts)
- *   - trigger == "channel-message" → Control UI / channel-plugin
- *     (audit's conversation-probe synthesises this tag for non-
- *     model_call paths).
- *
- * Channels other than "webchat" come from explicit channel plugins
- * (telegram / discord / feishu / ...) and pass through as-is.
- */
-function inferEntryLabel(
-  channelId: string | undefined,
-  trigger: string | undefined,
-  runId: string | undefined,
-): string | undefined {
-  if (!channelId) return undefined;
-  if (channelId !== "webchat") return channelId;
-  if (runId?.startsWith("ctrl_")) return "Control UI";
-  if (runId?.startsWith("chatcmpl_")) return "OpenAI API";
-  if (trigger === "channel-message") return "Control UI";
-  if (trigger === "heartbeat" || trigger === "cron" || trigger === "webhook") {
-    return `internal · ${trigger}`;
-  }
-  if (trigger === "user") return "OpenAI API";
-  // Last-resort: keep the raw "webchat" so the operator still sees the
-  // host's literal field rather than blank.
-  return "webchat";
-}
 
 function fmtDuration(ms: number | undefined): string {
   if (ms === undefined) return "—";
@@ -119,12 +80,12 @@ function SessionRow({ group }: { group: SessionGroup }) {
             <span>{t("conversations.session.runs", { count: group.runCount })}</span>
             {(() => {
               const firstRun = group.conversations[0];
-              const label = inferEntryLabel(
+              const key = inferEntryKey(
                 group.channelId,
                 firstRun?.trigger,
                 firstRun?.runId,
               );
-              if (!label) return null;
+              if (!key) return null;
               return (
                 <span
                   title={
@@ -133,7 +94,7 @@ function SessionRow({ group }: { group: SessionGroup }) {
                       : `host channel = "${group.channelId}"`
                   }
                 >
-                  · {label}
+                  · {friendlyEntryLabel(t, key)}
                 </span>
               );
             })()}

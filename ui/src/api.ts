@@ -270,6 +270,68 @@ export const api = {
       `/alerts/history?limit=${limit}`,
     ),
   costs: () => getJson<CostSnapshot>("/costs"),
+  insightsSlowCalls: (windowSec: number, limit: number) =>
+    getJson<{ windowSec: number; rows: SlowCallRow[] }>(
+      `/insights/slow-calls?windowSec=${windowSec}&limit=${limit}`,
+    ),
+  insightsHeavyConversations: (windowSec: number, limit: number) =>
+    getJson<{ windowSec: number; rows: HeavyConversationRow[] }>(
+      `/insights/heavy-conversations?windowSec=${windowSec}&limit=${limit}`,
+    ),
+  insightsErrorClusters: (windowSec: number, limit: number) =>
+    getJson<{ windowSec: number; rows: ErrorClusterRow[] }>(
+      `/insights/error-clusters?windowSec=${windowSec}&limit=${limit}`,
+    ),
+  insightsToolFailures: (windowSec: number, limit: number) =>
+    getJson<{ windowSec: number; rows: ToolFailureRow[] }>(
+      `/insights/tool-failures?windowSec=${windowSec}&limit=${limit}`,
+    ),
+};
+
+export type SlowCallRow = {
+  capturedAt: number;
+  durationMs: number;
+  provider?: string;
+  model?: string;
+  runId?: string;
+  callId?: string;
+  sessionKey?: string;
+  channel?: string;
+  responseStreamBytes?: number;
+};
+
+export type HeavyConversationRow = {
+  runId: string;
+  sessionId?: string;
+  sessionKey?: string;
+  channelId?: string;
+  trigger?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  llmHops: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  promptPreview?: string;
+};
+
+export type ErrorClusterRow = {
+  key: string;
+  provider?: string;
+  model?: string;
+  errorCategory?: string;
+  count: number;
+  lastSeenAt: number;
+  sampleRunIds: string[];
+};
+
+export type ToolFailureRow = {
+  toolName: string;
+  total: number;
+  errors: number;
+  errorRate: number;
+  lastFailureAt?: number;
+  sampleRunIds: string[];
 };
 
 export type CostRangeSummary = {
