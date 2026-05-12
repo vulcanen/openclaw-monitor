@@ -182,4 +182,4 @@ http://<gateway-host>:<port>/monitor/
 
 ## 许可
 
-UNLICENSED
+MIT — 见 [LICENSE](./LICENSE)。
