@@ -132,6 +132,10 @@
 
 17. **对话审计支持 `?groupBy=sessionKey`**（v0.6.0）：`/api/monitor/conversations` 默认仍返回 flat `conversations[]`（向后兼容），加 `?groupBy=sessionKey` 时改返回 `sessions[].conversations[]` 嵌套结构（`src/audit/conversation-routes.ts: groupBySession`）。每个 SessionGroup 聚合 runCount / totalTokensIn/Out / hasError / lastSeenAt。UI 默认走 groupBy 路径（`Conversations.tsx` 调 `api.conversationsBySession`），渲染可折叠面板。无 sessionKey 的旧记录归入 `_ungrouped` 桶。改 list handler 时保留两种返回 shape，**不要**默认只返回 grouped——历史 API 客户可能直接读 flat。
 
+18. **对话 summarize 有两个孪生函数，必须同步**（v0.6.3 修复，不要再回归）：`src/audit/conversation-routes.ts: summarizeRuntime`（处理内存里的 `recentCompleted`）和 `src/audit/conversation-store.ts: summarize`（处理 jsonl 召回）做完全相同的 `ConversationRecord → ConversationSummary` 转换。**改任何一个，另一个必须同步改**。v0.6.0 加 sessionKey 字段时只补了 routes 那个，store 那边漏了，结果磁盘上每条 record 都有 sessionKey 但被召回成 summary 时丢掉，UI 全部 conversation 都进 `_ungrouped` 桶。任何给 ConversationSummary 加新字段（trigger、tokensTotal、cost、tags…）的改动都要扫这两个文件同步加。最好长期改成共享一个 helper —— 没做是因为两端代码路径差异（一个有 in-flight `state` mutation，一个纯函数读 jsonl）暂时拆着；做 helper 要保持纯函数签名。
+
+19. **PC 端 dashboard，不做移动端**（v0.6.3 确立）：详见 UI 规则 #5。不要为 < 720px / 触屏 / 移动浏览器写代码 —— 用户场景是运维 PC，目标视口 1024px+。`styles.css` 只保留 1100px 那档（PC split-screen / 缩窗）。任何后续 UI 重构如果引入移动端布局，先回这里读一遍。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：
@@ -212,6 +216,47 @@ npm pack --dry-run                  # 看 tarball 内容
 ```
 
 **改动验收门槛（最低）：** `npm run typecheck && npm test && npm run build` 全绿。如果 UI 改了，再加 `cd ui && npm run typecheck`。
+
+## UI 规则（dashboard 风格 + 可用性底线）
+
+UI 是 React + Vite + Recharts 的内置仪表板（`ui/`），风格是 GitHub 风的 dark dashboard。**不要换风格** —— 在风格 token 系统内迭代。
+
+**设计 token（来自 `ui/src/styles.css:1-15`，唯一真源）：**
+- 颜色：`--bg #0e1117` / `--panel #161b22` / `--panel-2 #1c2230` / `--border #2a3142` / `--text #e6edf3` / `--text-dim #8b949e` / `--accent #58a6ff` / `--accent-2 #7ee787` / `--warn #f9b342` / `--error #ff7b72` / `--good #3fb950`
+- 字体：`--font` 系统无衬线（界面），`--mono` 等宽（数字、token、id、key、code）
+- 字号阶：page-title 20 / panel h3 13（uppercase + 0.04em letter-spacing）/ body 14 / table th 11 / mono code 12
+- 圆角阶：panel 8 / button & input 6 / tag 4 / token-gate-card 12
+
+**写 UI 时硬性遵守：**
+
+1. **不要写死颜色十六进制 / 字号** —— 都从 token 走（CSS var 或 `styles.css` 既有 class）。Recharts 等第三方需要硬编码十六进制时，从 token 的 hex 复制粘贴并加注释 "// matches --accent"。
+
+2. **不要用 emoji 当 icon**。需要图标用 inline SVG（Heroicons / Lucide 的源）。Dashboard 不靠图形传达，能用文字 + tag 表达就别加图标。
+
+3. **i18n 是硬约束** —— 任何用户可见的字符串必须经过 `t("ns.key")`，同步更新 `ui/src/i18n/zh.ts` 和 `ui/src/i18n/en.ts`。中文 key 写完不要忘了 EN。一处忘掉，对应 locale 会渲染原 key 字符串。
+
+4. **键盘 + 屏幕阅读器底线**（v0.6.3 加固）：
+   - **所有 interactive 元素都依赖 `:focus-visible` 全局样式**（`styles.css` 顶部已有）。**不要**在新组件上加 `outline: none` 把它关掉。如果觉得难看，调 `outline-offset` 或 `outline-color`，**不要**去掉。
+   - **form input 必须有 `<label>` 或 `aria-label`** —— placeholder 不算 label（WCAG 3.3.2）。可视隐藏时用 `<label className="sr-only">`。
+   - **icon-only 按钮 / 状态指示**（`.dot` 一类）`aria-label` 必填；纯装饰图形加 `aria-hidden="true"`。
+   - **错误提示用 `role="alert"`** 让屏幕阅读器即时播报（TokenGate 已示范）。
+   - 不要用 `title=` 替代 label —— `title` 在 touch 设备和 SR 上都不可靠。
+
+5. **PC 端 dashboard，不做移动端**。目标视口 ≥ 1024px，主战场是 1440 / 1920+ 大屏。`styles.css` 只保留一档断点 `@media (max-width: 1100px)`，覆盖 PC split-screen / 缩窗场景，把 `grid.cols-4` 折叠到 2 列。**不要**新增 `< 720px` 的特化布局，**不要**为触屏 / hamburger menu / mobile drawer 写代码 —— 用户场景是运维工程师的电脑，加这些只会膨胀代码。表格类内容靠 `.panel { overflow-x: auto }` 兜底横向滚动即可。
+
+6. **table 行 hover 仅在整行可点时才用**。当前 styles.css `table tbody tr:hover` 会给整行变色 —— 如果你让用户以为整行可点击，就必须真的让整行可点（包 `<Link>` 或 `onClick` + `cursor: pointer` + 键盘支持）。否则视觉撒谎。新加表格优先用 td 内 `<Link>` + 去掉 row hover。
+
+7. **颜色不是唯一指示器**（WCAG 1.4.1）。`tag.ok/error/warn` 自带文本，OK；`StatCard` 的 `delta.good/.bad/.warn` 也只是颜色 —— 真要传达严重度，加图标或前缀文字。
+
+8. **图表统一用 Recharts**（已是 dependency）。颜色从 token 走，tooltip 背景 `#161b22` 边框 `#2a3142`（参考 `TimeSeriesChart.tsx`）。不要再引入第二个图表库 —— bundle 已经 ~600 KB，主要就是 recharts + react。
+
+9. **新加状态色**（如 info / muted）先看 token 是否已有；扩 token 比新增 hex 好。`accent-2` 当前用于 component 字段绿色，不要乱占。
+
+10. **不要在 UI 里跑长任务** —— 5s polling 是上限，更频繁请求会冲 API 路由。需要实时改用 SSE（`/api/monitor/stream`，已有 `openEventStream` 抽象）。
+
+11. **`prefers-reduced-motion`**：新加 `transition` 或 `animation` 时必须包到 `@media (prefers-reduced-motion: no-preference)` 里，或在全局加 reduce 兜底（当前 styles.css 尚未加，未来加动画前补上）。
+
+12. **改完 UI 必须 `npm run build:ui`**（决策 #5 重复强调）—— Plugin 静态 handler 读的是 `dist/ui/index.html`，不重 build 浏览器看到的还是旧版。
 
 ## 测试规约
 

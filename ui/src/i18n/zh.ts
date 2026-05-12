@@ -33,6 +33,7 @@ export const zh = {
     "粘贴 OpenClaw gateway operator token 进入面板。token 仅保存在浏览器 localStorage 中，每次 API 请求自动附加 Authorization: Bearer … 头。",
   "tokenGate.help": "用 `openclaw config get gateway.auth.token` 查看 token",
   "tokenGate.placeholder": "在此粘贴 gateway token",
+  "tokenGate.inputLabel": "Gateway operator token",
   "tokenGate.submit": "解锁仪表板",
   "tokenGate.emptyError": "token 不能为空",
   "tokenGate.rejectedError": "token 已失效 (401) — 请重新输入",

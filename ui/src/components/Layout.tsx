@@ -56,20 +56,26 @@ export function Layout({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="spacer" />
-        <div className={`status ${live ? "live" : ""}`}>
-          <span className="dot" />
+        <div
+          className={`status ${live ? "live" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {/* The dot is a pure visual accent — the status text after it carries
+              the actual signal, so we hide the dot from assistive tech. */}
+          <span className="dot" aria-hidden="true" />
           {live ? t("status.live", { count: eventCount }) : t("status.idle")}
         </div>
         <button
           className="lang"
-          title={locale === "zh" ? "Switch to English" : "切换中文"}
+          aria-label={locale === "zh" ? "Switch to English" : "切换中文"}
           onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
         >
           {t("action.langSwitch")}
         </button>
         <button
           className="logout"
-          title={t("action.signOut")}
+          aria-label={t("action.signOut")}
           onClick={() => {
             tokenStore.clear();
             window.location.reload();
