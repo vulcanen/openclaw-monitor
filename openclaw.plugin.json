@@ -97,9 +97,9 @@
           "contentMaxBytes": {
             "type": "integer",
             "minimum": 256,
-            "maximum": 1048576,
-            "default": 16384,
-            "description": "Truncate any single content string longer than this. Truncated segments are flagged with truncated=true."
+            "maximum": 16777216,
+            "default": 1048576,
+            "description": "Truncate any single content string longer than this. Default raised to 1 MB in v0.6.0 so the conversation detail view shows full prompts and responses without truncation; bump up to 16 MB for extreme outliers. Truncated segments are flagged with truncated=true."
           },
           "retainDays": {
             "type": "integer",

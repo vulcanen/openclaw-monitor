@@ -169,6 +169,8 @@ export const zh = {
   "conversations.col.tokensIn": "输入 token",
   "conversations.col.tokensOut": "输出 token",
   "conversations.col.preview": "预览",
+  "conversations.session.runs": "{count} 次运行",
+  "conversations.session.tokens": "{input} 入 / {output} 出 token",
 
   // Conversation detail (M5)
   "conversationDetail.title": "对话 {runId}",

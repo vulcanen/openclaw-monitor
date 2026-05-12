@@ -120,7 +120,12 @@ export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   stream: { maxSubscribers: 16, heartbeatMs: 15_000 },
   audit: {
     enabled: true,
-    contentMaxBytes: 16384,
+    // Raised from 16 KB (v0.5.2 and earlier) to 1 MB so the conversation
+    // detail page can show full prompts and full assistant responses
+    // without "...[truncated]". The schema cap is 16 MB; bump
+    // plugins.entries.openclaw-monitor.config.audit.contentMaxBytes if you
+    // need to capture even larger payloads.
+    contentMaxBytes: 1_048_576,
     retainDays: 3,
     captureSystemPrompt: true,
   },

@@ -184,6 +184,27 @@ export function createAggregator(): Aggregator {
       }
     }
 
+    // Channel rollup fallback: when neither message.delivery.* nor
+    // message.processed carry the activity (e.g. OpenAI-compatible API path,
+    // Pi runtime via /v1/chat/completions), use the synthesized
+    // model.call.completed events that hook-metrics enriches with `channel`
+    // from the runId→ctx cache. Counts one channel-unit per model call,
+    // which matches the per-call grain shown by the Models page.
+    if (
+      isModelCallEvent(event) &&
+      event.type !== "model.call.started" &&
+      dims.channel &&
+      !isMessageDeliveryEvent(event) &&
+      !isMessageProcessedEvent(event)
+    ) {
+      const acc = accFor(channelStats, dims.channel);
+      acc.total += 1;
+      if (isError) acc.errors += 1;
+      if (typeof dims.durationMs === "number") acc.durations.push(dims.durationMs);
+      if (typeof dims.tokensIn === "number") acc.tokensIn += dims.tokensIn;
+      if (typeof dims.tokensOut === "number") acc.tokensOut += dims.tokensOut;
+    }
+
     // Source rollup: classify any event that carries a channel into an entry
     // path category (openai-api / control-ui / channel:<name>). Lets the UI
     // answer "how much of my traffic comes from which entry path".
