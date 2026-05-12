@@ -66,7 +66,6 @@ export const en: Strings = {
   "stat.errors": "{count} errors",
   "stat.errorRateDetail": "{errors}/{total}",
   "stat.latency": "latency",
-  "stat.stalledStuck": "stalled / stuck",
   "chart.eventsLast15m": "events / 10s · last 15m",
   "chart.modelCallsLast15m": "model calls / 10s · last 15m",
   "chart.modelErrorsLast15m": "model errors / 10s · last 15m",

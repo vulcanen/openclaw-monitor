@@ -121,12 +121,15 @@ export function isWebhookEvent(event: DiagnosticEventPayload): boolean {
   return event.type.startsWith("webhook.");
 }
 
+// "Real" session-level alerts only. `diagnostic.liveness.warning` was
+// previously bundled in here, but host code emits it on any sustained
+// event-loop delay (busy GC, high CPU, etc.) regardless of whether a
+// session is actually stuck. Surfacing it as "stalled / stuck" caused
+// alarming counters on perfectly healthy gateways. The raw event is still
+// captured in the ring buffer / events page if anyone wants to see it —
+// it just no longer counts as a session attention signal.
 export function isSessionAlertEvent(event: DiagnosticEventPayload): boolean {
-  return (
-    event.type === "session.stalled" ||
-    event.type === "session.stuck" ||
-    event.type === "diagnostic.liveness.warning"
-  );
+  return event.type === "session.stalled" || event.type === "session.stuck";
 }
 
 export function isHarnessRunEvent(event: DiagnosticEventPayload): boolean {

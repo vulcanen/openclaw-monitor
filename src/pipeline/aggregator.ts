@@ -287,11 +287,14 @@ export function createAggregator(): Aggregator {
         snap.webhookEvents += 1;
         if (point.type === "webhook.error") snap.webhookErrors += 1;
       }
-      if (
-        point.type === "session.stalled" ||
-        point.type === "session.stuck" ||
-        point.type === "diagnostic.liveness.warning"
-      ) {
+      // Only `session.stalled` / `session.stuck` are emitted by the host's
+      // per-session attention check. `diagnostic.liveness.warning` is a
+      // process-wide event-loop / CPU pressure signal that the host also
+      // emits during routine busy phases — counting it as a session
+      // alert led to false-positive "stalled / stuck" panic on the
+      // overview. Drop it from the rollup; the raw event is still in the
+      // buffer for anyone who wants to inspect it on the Events page.
+      if (point.type === "session.stalled" || point.type === "session.stuck") {
         snap.sessionsAlerted += 1;
       }
     }
