@@ -178,6 +178,62 @@ All `/api/monitor/*` routes require `Authorization: Bearer <gateway-operator-tok
 | `GET /api/monitor/insights/tool-failures?windowSec=&limit=` | Per-tool failure count + rate |
 | `GET /monitor/*` | Bundled dashboard |
 
+## Known config notes for self-hosted LLM providers
+
+### Costs page is stuck at 0 tokens — set `compat.supportsUsageInStreaming` on the model
+
+OpenClaw transparently asks every OpenAI-compat upstream for streamed usage
+(it pins `stream_options.include_usage: true` on every request — see host
+`src/agents/openai-transport-stream.ts`). The problem is on the parser side:
+when an OpenAI-compat provider has a baseUrl the host doesn't recognise
+(any private gateway / vLLM / SGLang / TGI deployment of yours), host
+`src/plugins/provider-model-compat.ts` defaults
+`model.compat.supportsUsageInStreaming` to `false` — and the stream
+reader silently **drops the final usage frame** the upstream actually
+sent. Tokens and cost on the Monitor's Costs page stay at 0 forever.
+
+Override the default per-model:
+
+```jsonc
+"models": {
+  "providers": {
+    "qwen": {
+      "baseUrl": "http://your-internal-gateway/v1",
+      "apiKey": "...",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen3-5-397b-a17b",
+          "name": "Qwen 3.5",
+          // ...existing fields...
+          "compat": {
+            "supportsUsageInStreaming": true
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Restart the gateway. The Costs page should start showing tokens within a
+few requests. If you also want money figures, fill in
+`plugins.entries.openclaw-monitor.config.pricing.models["provider/model"]`
+with per-1k-token rates.
+
+How to verify the upstream itself is OK before blaming the host:
+
+```bash
+curl -s "$BASE_URL/chat/completions" -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"...", "messages":[{"role":"user","content":"hi"}],
+       "stream": true,
+       "stream_options": {"include_usage": true}}'
+```
+
+If the last `data:` chunk before `[DONE]` contains a non-empty `"usage"`
+object, the upstream is fine and you only need the `compat` flag above.
+
 ## Privacy and storage
 
 - Content audit captures raw prompt / assistant text and may contain PII or business secrets; stored as plain-text JSONL — restrict operator access accordingly

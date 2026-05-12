@@ -90,9 +90,9 @@ export const en: Strings = {
   "costs.notice.noPricing": "tokens recorded but the price table is empty — every cost is 0",
   "costs.notice.noPricingHint":
     "Add your provider/model entries to plugins.entries.openclaw-monitor.config.pricing.models (per 1k tokens) in ~/.openclaw/openclaw.json, then restart the gateway.",
-  "costs.notice.noTokens": "token data is 0 — the upstream provider isn't returning `usage` in its response",
+  "costs.notice.noTokens": "Token data is 0 — set compat.supportsUsageInStreaming: true on the model first",
   "costs.notice.noTokensHint":
-    "Cost depends on the usage block (input/output/cacheRead/cacheWrite) surfaced by the llm_output hook. If your upstream LLM provider omits `usage` from the OpenAI-compatible response (some self-hosted gateways, proxies, or specific models do), this page will stay at 0. Verify the upstream response carries non-zero usage; if it goes through a proxy, the proxy may need to forward `usage` from the underlying model.",
+    "OpenClaw host defaults `supportsUsageInStreaming` to false for any OpenAI-compat provider with an unrecognised baseUrl (host: src/plugins/provider-model-compat.ts), which silently drops the usage frame the upstream actually sends. Fix: add \"compat\": { \"supportsUsageInStreaming\": true } to the model entry under models.providers.<id>.models[*] in ~/.openclaw/openclaw.json and restart the gateway. See the README \"Known config notes for self-hosted LLM providers\" section. If it's still 0 after that, verify the upstream itself returns usage (curl it directly with stream_options.include_usage:true).",
 
 
   // Alerts (v0.7.0+)

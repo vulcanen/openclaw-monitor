@@ -178,6 +178,50 @@ http://<gateway-host>:<port>/monitor/
 | `GET /api/monitor/insights/tool-failures?windowSec=&limit=` | 工具失败次数 + 失败率 Top-N |
 | `GET /monitor/*` | 内置仪表板 |
 
+## 自建 LLM 上游的已知配置注意点
+
+### Costs 页 token 一直显示 0 —— 给 model 加 `compat.supportsUsageInStreaming: true`
+
+OpenClaw 转发请求时**已经**带了 `stream_options.include_usage: true`（host 源码 `src/agents/openai-transport-stream.ts` 写死的）。问题在 parser：host 对**未知 baseUrl** 的 OpenAI-compat provider（任何你自建的 vLLM / SGLang / TGI / 公司网关）默认把 `model.compat.supportsUsageInStreaming` 设成 `false`（`src/plugins/provider-model-compat.ts`），导致 stream parser **静默丢弃**上游真实发回来的 usage 帧。结果就是 Monitor 的 Costs 页 token / cost 永远是 0。
+
+按模型覆盖默认：
+
+```jsonc
+"models": {
+  "providers": {
+    "qwen": {
+      "baseUrl": "http://your-internal-gateway/v1",
+      "apiKey": "...",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen3-5-397b-a17b",
+          "name": "Qwen 3.5",
+          // ...原有字段...
+          "compat": {
+            "supportsUsageInStreaming": true
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+重启 gateway。几次请求后 Costs 页就有 token 了。要看人民币成本，再在 `plugins.entries.openclaw-monitor.config.pricing.models["provider/model"]` 里填每 1k token 的单价。
+
+排错时先验证上游本身正常（绕过 OpenClaw）：
+
+```bash
+curl -s "$BASE_URL/chat/completions" -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"...", "messages":[{"role":"user","content":"hi"}],
+       "stream": true,
+       "stream_options": {"include_usage": true}}'
+```
+
+`[DONE]` 前的最后一个 `data:` 块带非空 `"usage"` 字段 → 上游是好的，只需要上面那个 `compat` flag。
+
 ## 隐私与存储
 
 - 内容审计抓取的是原始 prompt / assistant 文本，可能含 PII / 业务密钥；落盘为明文 JSONL，请控制运维角色访问
