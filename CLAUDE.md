@@ -19,7 +19,7 @@
 - **解决什么**：OpenClaw 自身的诊断事件总线只对内可见，对运维是黑盒。这个插件把事件总线接出来，做聚合 / 持久化 / 实时推流 / 仪表板 / 内容审计。
 - **不解决什么**：不替代 Prometheus / Grafana / OTel Collector。OpenClaw 已自带 `diagnostics-otel` 和 `diagnostics-prometheus` 两个导出器，本插件与它们并存。
 - **不在范围**：不修改 OpenClaw core，不引入对其他 extension 私有 src/** 的依赖。
-- **scope/registry**：`@vulcanen` scope（npm 个人 scope，注册账号自动持有），发布到公开 npm `https://registry.npmjs.org/`。安装侧通过 `.npmrc` 走公司代理 `https://registry.npmmirror.com/`（已镜像 npmjs 上游）。
+- **scope/registry**：`@vulcanen` scope（npm 个人 scope，注册账号自动持有），发布到公开 npm `https://registry.npmjs.org/`。安装 / 解析 / publish 全部走 npmjs 公网，无 mirror 依赖。
 
 ## 架构（必须按层改）
 
@@ -154,7 +154,7 @@
 
 28. **windows snapshot 的 totalTokens 含义**（v0.8.0）：`WindowSnapshot.totalTokens` 是 input + output + cacheRead + cacheWrite **四类合计**，不是单一 input。`/api/monitor/costs` 把它放到 `windows[w].tokensIn` 字段里（CostRangeSummary 字段名复用，没增字段），UI 直接读 `tokensIn` 当总 token 显示。这是个故意的字段名复用 —— 真要分开看四类，去 Costs 页的 byModel 表（每行单独列）。改 windows 计算时**不要**只加 input 一类，会让今日 stat card 数字偏小。
 
-29. **Token 数据卡点是 host `supportsUsageInStreaming` 默认 false，不是 provider 物理限制**（v0.8.0 误判 → 实测验证 → 修正）：曾以为是上游 qwen 不返回 usage —— curl 直连上游证伪了：上游加 `stream_options.include_usage: true` 后最后一帧带完整 usage。真正卡点在 host `src/plugins/provider-model-compat.ts:127`：host 对**未知 baseUrl** 的 OpenAI-compat provider 自动把 `model.compat.supportsUsageInStreaming` 写死 `false`。结果 host 自己的 stream parser **静默丢弃**上游返回的 usage 帧。修复：在 user `openclaw.json` 给该 model 加 `compat: { supportsUsageInStreaming: true }` 覆盖默认。已写进 README 双语"Known config notes / 自建 LLM 上游"段。任何用自建 OpenAI-compat 网关（vLLM / SGLang / TGI / 公司 proxy）的用户都会踩。**不要**改回"上游不返回 usage"的旧解释 —— 那是错的。**不要**改成 prompt char count / 4 估算 —— 该 fix 让 token 数精确可得，没必要估算。Costs UI 仍保留 byModel.tokens=0 时的提示 banner（对真没价格表 / 真不发 usage 的极端 provider 还是兜底），但文字应同时说明"先检查 compat.supportsUsageInStreaming"。
+29. **Token 数据卡点是 host `supportsUsageInStreaming` 默认 false，不是 provider 物理限制**（v0.8.0 误判 → 实测验证 → 修正）：曾以为是上游不返回 usage —— curl 直连上游证伪了：加 `stream_options.include_usage: true` 后最后一帧带完整 usage。真正卡点在 host `src/plugins/provider-model-compat.ts:127`：host 对**未知 baseUrl** 的 OpenAI-compat provider 自动把 `model.compat.supportsUsageInStreaming` 写死 `false`。结果 host 自己的 stream parser **静默丢弃**上游返回的 usage 帧。修复：在 user `openclaw.json` 给该 model 加 `compat: { supportsUsageInStreaming: true }` 覆盖默认。已写进 README 双语"Known config notes / 自建 LLM 上游"段。任何用自建 OpenAI-compat 网关（vLLM / SGLang / TGI / 自建 proxy）的用户都会踩。**不要**改回"上游不返回 usage"的旧解释 —— 那是错的。**不要**改成 prompt char count / 4 估算 —— 该 fix 让 token 数精确可得，没必要估算。Costs UI 仍保留 byModel.tokens=0 时的提示 banner（对真没价格表 / 真不发 usage 的极端 provider 还是兜底），但文字应同时说明"先检查 compat.supportsUsageInStreaming"。
 
 30. **`webchat` 是 host 的 INTERNAL_MESSAGE_CHANNEL 常量，不是浏览器聊天**（v0.8.3 + v0.8.4 改进）：OpenClaw `src/utils/message-channel-constants.ts:1` 把字符串 "webchat" 当作"所有非 channel-plugin 入口"的统一标识，覆盖：`/v1/chat/completions`、Control UI 内置聊天、heartbeat / cron / webhook 内部触发。**channel 字段单独无法区分这些路径**。要区分必须用：(a) runId 前缀：`chatcmpl_*` = OpenAI compat（host `openai-http.ts` 构造），`ctrl_*` = Control UI（host `server-chat.ts` 构造）；(b) trigger：`channel-message` = audit 路径（conversation-probe 合成），`user/heartbeat/cron/webhook` = host 设的。Host 实测**对 OpenAI compat 和 Control UI 都设 trigger=user**，所以**只靠 trigger 区分不可靠**，必须 runId 优先。共享逻辑：backend `src/pipeline/extractors.ts: extractSource`，UI `ui/src/entry-label.ts: inferEntryKey + friendlyEntryLabel`。**不要**让两个地方分别维护推断逻辑 — 始终走 ui/src/entry-label.ts 这个共享 helper。
 

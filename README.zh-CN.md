@@ -182,7 +182,7 @@ http://<gateway-host>:<port>/monitor/
 
 ### Costs 页 token 一直显示 0 —— 给 model 加 `compat.supportsUsageInStreaming: true`
 
-OpenClaw 转发请求时**已经**带了 `stream_options.include_usage: true`（host 源码 `src/agents/openai-transport-stream.ts` 写死的）。问题在 parser：host 对**未知 baseUrl** 的 OpenAI-compat provider（任何你自建的 vLLM / SGLang / TGI / 公司网关）默认把 `model.compat.supportsUsageInStreaming` 设成 `false`（`src/plugins/provider-model-compat.ts`），导致 stream parser **静默丢弃**上游真实发回来的 usage 帧。结果就是 Monitor 的 Costs 页 token / cost 永远是 0。
+OpenClaw 转发请求时**已经**带了 `stream_options.include_usage: true`（host 源码 `src/agents/openai-transport-stream.ts` 写死的）。问题在 parser：host 对**未知 baseUrl** 的 OpenAI-compat provider（任何自建的 vLLM / SGLang / TGI / 自建 proxy）默认把 `model.compat.supportsUsageInStreaming` 设成 `false`（`src/plugins/provider-model-compat.ts`），导致 stream parser **静默丢弃**上游真实发回来的 usage 帧。结果就是 Monitor 的 Costs 页 token / cost 永远是 0。
 
 按模型覆盖默认：
 

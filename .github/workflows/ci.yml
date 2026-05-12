@@ -30,28 +30,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # No `cache: npm` here — the project's .npmrc points at an
-          # internal company mirror (registry.npmmirror.com) that runners
-          # cannot reach. We override the registry per-install below.
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
 
-      # The committed .npmrc targets a private mirror (registry.npmmirror.com)
-      # for local dev convenience. CI runners are outside that network, so
-      # we redirect to the public registry — both on the live config and
-      # in the lockfiles whose `resolved` URLs are hard-coded to the mirror
-      # (831 entries across the two lockfiles at the time of writing).
-      # npm verifies tarballs by the `integrity` SHA, which doesn't change
-      # when we swap registry hosts, so this rewrite is safe.
-      - name: Redirect lockfiles to public npm registry
-        run: |
-          sed -i 's|registry.npmmirror.com|registry.npmjs.org|g' \
-            package-lock.json ui/package-lock.json
-
+      # The committed .npmrc files pin the registry to npmmirror, which is
+      # a public CN-located mirror of the npmjs upstream — reachable from
+      # GitHub-hosted runners, fast for contributors in CN.
       - name: Install backend dependencies
-        run: npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Install UI dependencies
         working-directory: ui
-        run: npm install --registry=https://registry.npmjs.org/ --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck (backend)
         run: npm run typecheck

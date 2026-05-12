@@ -52,7 +52,7 @@ npm test                      # vitest
 npm run build                 # plugin + UI -> dist/
 ```
 
-The committed `.npmrc` points at a private company mirror for the original developer's machine. If you're outside that network just override the registry on the command line: `npm install --registry=https://registry.npmjs.org/`. CI does this automatically.
+The committed `.npmrc` pins the registry to `registry.npmmirror.com` (a public CN-located mirror of npmjs). Override on the command line if you want a different upstream: `npm install --registry=https://registry.npmjs.org/`.
 
 ## Pull request checklist
 
