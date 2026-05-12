@@ -1,5 +1,6 @@
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type ConversationSummary } from "../api.js";
+import { api, type ConversationSummary, type SessionGroup } from "../api.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
 
@@ -12,14 +13,134 @@ function fmtDuration(ms: number | undefined): string {
   return `${mins}m${secs}s`;
 }
 
+function StatusTag({ status }: { status: ConversationSummary["status"] }) {
+  const { t } = useI18n();
+  const cls = status === "completed" ? "ok" : status === "active" ? "active" : "error";
+  return <span className={`tag ${cls}`}>{t(`runs.status.${status}` as never)}</span>;
+}
+
+function SessionRow({ group }: { group: SessionGroup }) {
+  const { t } = useI18n();
+  // First-load: keep the freshest sessions expanded so a user landing on the
+  // page sees recent conversations without an extra click. Older sessions
+  // start collapsed and reveal their run list on demand.
+  const [open, setOpen] = useState(true);
+  const sessionLabel = group.sessionKey === "_ungrouped" ? "—" : group.sessionKey;
+  return (
+    <div
+      className="panel"
+      style={{ marginBottom: 12, padding: 0 }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          width: "100%",
+          padding: "12px 16px",
+          background: "transparent",
+          color: "inherit",
+          border: "none",
+          borderBottom: open ? "1px solid var(--border)" : "none",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: "inherit",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ width: 16, color: "var(--text-dim)" }}>{open ? "▼" : "▶"}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: "var(--mono)",
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={sessionLabel}
+          >
+            {sessionLabel}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-dim)",
+              marginTop: 2,
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>{t("conversations.session.runs", { count: group.runCount })}</span>
+            {group.channelId ? <span>· {group.channelId}</span> : null}
+            <span>
+              · {t("conversations.session.tokens", {
+                input: group.totalTokensIn,
+                output: group.totalTokensOut,
+              })}
+            </span>
+            <span>· {new Date(group.lastSeenAt).toLocaleString()}</span>
+          </div>
+        </div>
+        {group.hasError ? <span className="tag error">err</span> : null}
+      </button>
+      {open ? (
+        <table style={{ marginTop: 0 }}>
+          <thead>
+            <tr>
+              <th>{t("conversations.col.runId")}</th>
+              <th>{t("conversations.col.status")}</th>
+              <th>{t("conversations.col.started")}</th>
+              <th>{t("conversations.col.duration")}</th>
+              <th className="num">{t("conversations.col.hops")}</th>
+              <th className="num">{t("conversations.col.tokensIn")}</th>
+              <th className="num">{t("conversations.col.tokensOut")}</th>
+              <th>{t("conversations.col.preview")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.conversations.map((c) => (
+              <tr key={c.runId}>
+                <td>
+                  <Link to={`/conversations/${encodeURIComponent(c.runId)}`}>{c.runId}</Link>
+                </td>
+                <td>
+                  <StatusTag status={c.status} />
+                </td>
+                <td>{new Date(c.startedAt).toLocaleString()}</td>
+                <td>{fmtDuration(c.durationMs)}</td>
+                <td className="num">{c.llmHops}</td>
+                <td className="num">{c.totalTokensIn}</td>
+                <td className="num">{c.totalTokensOut}</td>
+                <td
+                  style={{
+                    maxWidth: 360,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    fontFamily: "var(--font)",
+                  }}
+                  title={c.promptPreview ?? c.responsePreview ?? ""}
+                >
+                  {c.promptPreview ?? c.responsePreview ?? "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </div>
+  );
+}
+
 export function Conversations() {
   const { t } = useI18n();
-  const { data, error } = usePolling(() => api.conversations(100), 5_000);
-
-  const statusTag = (status: ConversationSummary["status"]) => {
-    const cls = status === "completed" ? "ok" : status === "active" ? "active" : "error";
-    return <span className={`tag ${cls}`}>{t(`runs.status.${status}` as never)}</span>;
-  };
+  const fetcher = useMemo(() => () => api.conversationsBySession(100), []);
+  const { data, error } = usePolling(fetcher, 5_000);
 
   return (
     <div>
@@ -30,7 +151,7 @@ export function Conversations() {
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {data && data.conversations.length === 0 ? (
+      {data && data.sessions.length === 0 ? (
         <div className="panel">
           <div className="empty">
             <div style={{ marginBottom: 12, fontSize: 14 }}>{t("conversations.empty")}</div>
@@ -44,50 +165,11 @@ export function Conversations() {
         </div>
       ) : null}
 
-      {data && data.conversations.length > 0 ? (
-        <div className="panel">
-          <table>
-            <thead>
-              <tr>
-                <th>{t("conversations.col.runId")}</th>
-                <th>{t("conversations.col.status")}</th>
-                <th>{t("conversations.col.channel")}</th>
-                <th>{t("conversations.col.started")}</th>
-                <th>{t("conversations.col.duration")}</th>
-                <th className="num">{t("conversations.col.hops")}</th>
-                <th className="num">{t("conversations.col.tokensIn")}</th>
-                <th className="num">{t("conversations.col.tokensOut")}</th>
-                <th>{t("conversations.col.preview")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.conversations.map((c) => (
-                <tr key={c.runId}>
-                  <td>
-                    <Link to={`/conversations/${encodeURIComponent(c.runId)}`}>{c.runId}</Link>
-                  </td>
-                  <td>{statusTag(c.status)}</td>
-                  <td>{c.trigger ?? c.channelId ?? "—"}</td>
-                  <td>{new Date(c.startedAt).toLocaleString()}</td>
-                  <td>{fmtDuration(c.durationMs)}</td>
-                  <td className="num">{c.llmHops}</td>
-                  <td className="num">{c.totalTokensIn}</td>
-                  <td className="num">{c.totalTokensOut}</td>
-                  <td
-                    style={{
-                      maxWidth: 360,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      fontFamily: "var(--font)",
-                    }}
-                  >
-                    {c.promptPreview ?? c.responsePreview ?? "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {data && data.sessions.length > 0 ? (
+        <div>
+          {data.sessions.map((group) => (
+            <SessionRow key={group.sessionKey} group={group} />
+          ))}
         </div>
       ) : null}
     </div>

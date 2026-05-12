@@ -175,6 +175,8 @@ export const en: Strings = {
   "conversations.col.tokensIn": "tokens in",
   "conversations.col.tokensOut": "tokens out",
   "conversations.col.preview": "preview",
+  "conversations.session.runs": "{count} runs",
+  "conversations.session.tokens": "{input} in / {output} out tokens",
 
   // Conversation detail (M5)
   "conversationDetail.title": "conversation {runId}",

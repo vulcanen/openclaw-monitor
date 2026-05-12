@@ -120,6 +120,7 @@ export type SeriesResponse = {
 export type ConversationSummary = {
   runId: string;
   sessionId?: string;
+  sessionKey?: string;
   channelId?: string;
   trigger?: string;
   status: "active" | "completed" | "error";
@@ -132,6 +133,19 @@ export type ConversationSummary = {
   promptPreview?: string;
   responsePreview?: string;
   hasError: boolean;
+};
+
+export type SessionGroup = {
+  sessionKey: string;
+  sessionId?: string;
+  channelId?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  runCount: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  hasError: boolean;
+  conversations: ConversationSummary[];
 };
 
 export type LlmInputSegment = {
@@ -239,6 +253,10 @@ export const api = {
   conversations: (limit = 50) =>
     getJson<{ active: number; conversations: ConversationSummary[] }>(
       `/conversations?limit=${limit}`,
+    ),
+  conversationsBySession: (limit = 50) =>
+    getJson<{ active: number; groupBy: "sessionKey"; sessions: SessionGroup[] }>(
+      `/conversations?limit=${limit}&groupBy=sessionKey`,
     ),
   conversationDetail: (runId: string) =>
     getJson<{ conversation: ConversationRecord }>(

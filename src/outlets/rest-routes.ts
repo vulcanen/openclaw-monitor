@@ -213,6 +213,58 @@ export function createRunDetailHandler(params: {
   };
 }
 
+// Severity inferred from a diagnostic event's type when the event itself
+// doesn't carry an explicit `level` field. Host `log.record` events would
+// carry their own level, but those never reach external plugins (the host
+// dispatcher drops them before onDiagnosticEvent), so for every other event
+// type we synthesize a sensible severity here.
+function inferLogLevel(event: { type: string }, raw: Record<string, unknown>): string | undefined {
+  if (typeof raw["level"] === "string") return raw["level"];
+  const type = event.type;
+  if (type.endsWith(".error") || type === "session.stuck" || type === "session.stalled") {
+    return "error";
+  }
+  if (type === "tool.execution.blocked" || type === "diagnostic.liveness.warning") {
+    return "warn";
+  }
+  if (type === "diagnostic.heartbeat" || type === "diagnostic.memory.sample") {
+    return "debug";
+  }
+  return "info";
+}
+
+function formatLogMessage(event: { type: string }, raw: Record<string, unknown>): string {
+  if (typeof raw["message"] === "string") return raw["message"];
+  // Compose a one-liner from the most relevant fields. Order is chosen for
+  // readability — runId/callId first so a reader can grep by id, then
+  // model/tool/channel, then any error details.
+  const parts: string[] = [event.type];
+  for (const key of [
+    "runId",
+    "callId",
+    "toolCallId",
+    "sessionKey",
+    "provider",
+    "model",
+    "toolName",
+    "channel",
+    "trigger",
+    "durationMs",
+    "outcome",
+    "errorMessage",
+    "errorCategory",
+    "reason",
+    "state",
+    "prevState",
+    "queueDepth",
+  ]) {
+    const value = raw[key];
+    if (value === undefined || value === null) continue;
+    parts.push(`${key}=${typeof value === "string" ? value : JSON.stringify(value)}`);
+  }
+  return parts.join(" ");
+}
+
 export function createLogsHandler(buffer: EventBuffer): OpenClawPluginHttpRouteHandler {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const query = parseQuery(req.url);
@@ -223,16 +275,30 @@ export function createLogsHandler(buffer: EventBuffer): OpenClawPluginHttpRouteH
         : 200;
     const levelFilter = query.get("level") ?? undefined;
     const componentFilter = query.get("component") ?? undefined;
-    const items = buffer.recent({ type: "log.record", limit: limit * 2 });
+    const typeFilter = query.get("type") ?? undefined;
+    // The host filters all `log.record` events out of onDiagnosticEvent
+    // before any external plugin sees them (see CLAUDE.md / host
+    // diagnostic-events.ts). The Logs page therefore renders the diagnostic
+    // event stream itself: each event becomes a log line with severity
+    // inferred from the event type. This is the closest analog we can
+    // surface without a private logging subscription.
+    const items = buffer.recent({
+      ...(typeFilter ? { type: typeFilter as EventType } : {}),
+      limit: limit * 4,
+    });
+    // Newest first.
+    items.reverse();
     const records: LogRecord[] = [];
     for (const item of items) {
       const raw = item.event as unknown as Record<string, unknown>;
-      const level = typeof raw["level"] === "string" ? raw["level"] : undefined;
-      const component = typeof raw["component"] === "string" ? raw["component"] : undefined;
-      const message =
-        typeof raw["message"] === "string" ? raw["message"] : item.event.type;
+      const level = inferLogLevel(item.event, raw);
+      const component =
+        typeof raw["component"] === "string"
+          ? raw["component"]
+          : item.event.type.split(".")[0];
+      const message = formatLogMessage(item.event, raw);
       if (levelFilter && level !== levelFilter) continue;
-      if (componentFilter && component !== componentFilter) continue;
+      if (componentFilter && !component?.includes(componentFilter)) continue;
       records.push({
         capturedAt: new Date(item.capturedAt).toISOString(),
         ...(level ? { level } : {}),
