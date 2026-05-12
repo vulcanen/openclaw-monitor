@@ -63,7 +63,6 @@ export const zh = {
   "stat.errors": "{count} 个错误",
   "stat.errorRateDetail": "{errors}/{total}",
   "stat.latency": "延迟",
-  "stat.stalledStuck": "停滞 / 卡死",
   "chart.eventsLast15m": "事件 / 10s · 近 15m",
   "chart.modelCallsLast15m": "模型调用 / 10s · 近 15m",
   "chart.modelErrorsLast15m": "模型错误 / 10s · 近 15m",

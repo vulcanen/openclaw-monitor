@@ -61,7 +61,6 @@ export function Overview() {
         <StatCard
           label={t("stat.sessionAlerts15m")}
           value={data.windows["15m"].sessionsAlerted}
-          delta={t("stat.stalledStuck")}
           tone={data.windows["15m"].sessionsAlerted > 0 ? "warn" : "good"}
         />
       </div>
