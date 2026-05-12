@@ -2,6 +2,17 @@
 
 给 AI agent 看的项目共识文档。改动之前先读完这一页。**改动哪个层就要遵守哪个层的契约**，不要跨层猜测。
 
+## 文档维护规则（元规则，第一条读）
+
+每次改完代码、准备 commit 之前，先回答两个问题：
+
+1. 本次改动是否引入了新的层职责 / 新的 host 行为发现 / 新的工程约束 / 修了一个曾经踩过的坑？
+   - 是 → 把它写进本文件的「关键事实」或「关键工程决策」一节（决策块编号顺延，不要覆盖历史决策），引用具体文件路径和事件名让以后能精确定位。
+2. 本次改动是否改变了功能 / 配置默认值 / HTTP 端点 / UI 用户可见行为？
+   - 是 → 同步改 `README.md`。`README` 是给运维 / 用户看的纯功能说明，**不写**版本历史 / 内部决策 / 调试技巧 / 解释性废话；一行能说清楚就一行。
+
+两份文档都改完才 commit。这条规则是用户在 v0.6.1 之后明确划下的协作红线。
+
 ## 项目定位
 
 - **是什么**：`@vulcanen/openclaw-monitor` 是一个 OpenClaw 5.7 插件，发布到公开 npm。
@@ -69,6 +80,20 @@
 
 **实操结论**：依赖 `onDiagnosticEvent` 是个**死路**。Metrics 必须从 hook 走，事件总线只能拿到运维侧信号（队列 / session 状态 / 内存 / 心跳）。
 
+**Hook 上下文字段并非统一** —— 不同 hook 的 `ctx` 形状不一样（host 源码 `src/agents/pi-embedded-runner/run/attempt.model-diagnostic-events.ts: modelCallHookContext` vs `attempt.ts: agent_end` 块）：
+
+| Hook | runId | sessionKey/Id | channelId | trigger | provider/model |
+|---|---|---|---|---|---|
+| `model_call_started/ended` | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `before_tool_call/after_tool_call` | ✅(event) | ❌ | ❌ | ❌ | ❌ |
+| `agent_turn_prepare` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `agent_end` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `before_prompt_build` / `llm_input` / `llm_output` | ✅ | ✅ | ✅ | ✅ | varies |
+
+任何想给 `model.call.*` / `tool.execution.*` 事件补 channel/trigger 的代码，**必须**从 `agent_turn_prepare`/`agent_end` 维护一个 `runId → {channelId, trigger}` 缓存来回查（`src/probes/hook-metrics.ts` 的 `makeRunContextRegistry`）；指望 model_call hook 的 ctx 自带 channel 永远拿不到。
+
+**误导性事件**：`diagnostic.liveness.warning` 是**进程级**事件循环 / CPU 压力信号（host `src/logging/diagnostic.ts:380` emit；CPU 忙、GC 压力、event-loop p99 超阈值都会触发），**不是会话级**告警。不要把它当 "session stalled / stuck" 渲染（v0.6.1 已经把它从 `sessionsAlerted` 里剔掉）。真正的 per-session 注意力信号只有 `session.stalled` 和 `session.stuck`（host `diagnostic.ts:810-822`）。
+
 ## 关键工程决策（不要倒退）
 
 1. **存储用 JSONL，不用 SQLite** —— OpenClaw 安装时强制 `--ignore-scripts`（[已验证](D:/projects/offical-openclaw/openclaw-2026.5.7/src/plugins/install.ts)），better-sqlite3 这类带 native postinstall 的包**装不上**。JSONL append-only + 按日期分文件，零原生依赖、retention 直接 `unlink` 旧文件。
@@ -96,6 +121,16 @@
     - `api.registerService` / `api.registerHttpRoute` / `api.registerCli` **只在第一次 register 调用**（用 `routesAndServiceWired` flag 锁住），后续 register 直接跳过 —— 同一 path 重复注册要么报错要么 shadow 第一个 handler，而且只有第一个 api 真正连到 gateway HTTP server。
     - `bundle.registerHooks(api)` **每次 register 都要调**，因为不同 load profile 用不同的 hook 注册表；fanout 的 `callId`/`toolCallId` dedup 表会吸收重复 inject。
     - 回归测试在 `src/service.test.ts > "plugin entry idempotency"`，改 entry 时务必跑。
+
+13. **Channel / Source 维度必须靠 runId 缓存补全**（v0.6.0 修复）：`model_call_*` 和 `*_tool_call` hook 的 ctx 不带 `channelId` / `trigger`，所以 `src/probes/hook-metrics.ts` 用一个 module-level 的 `runId → {channelId, trigger}` Map（`makeRunContextRegistry`），在 `agent_turn_prepare` / `agent_end` 时写入，在 inject `model.call.*` / `tool.execution.*` / `harness.run.*` 之前用 `enrich(synth, runId)` 回填。**不要删掉这层缓存**，否则通道页和来源页又会归零（`/api/monitor/channels` 和 `/api/monitor/sources`）。TTL 60 秒覆盖 model.call 在 agent_end 之后才到达的边界场景。aggregator 的 channels 维度也加了 model.call 兜底累计（`src/pipeline/aggregator.ts` 里检查 `dims.channel && isModelCallEvent(...)`）—— 注意这里跟 message.delivery / message.processed 的累计是**并行而非重复**：每条事件最多进一个分支，由 `if (!isMessageDeliveryEvent && !isMessageProcessedEvent)` gate 把关。
+
+14. **Logs 页是诊断事件流，不是 host 日志**（v0.6.0 改造）：`log.record` 事件被 host 在 `onDiagnosticEvent` 之前过滤掉了（决策 #5），外部插件**永远拿不到**真正的 host 日志。`src/outlets/rest-routes.ts: createLogsHandler` 不再去 buffer 里找 `log.record`，而是直接消费 buffer 的全部事件，按 event type 推断 level（`.error/.stuck/.stalled → error`，`.blocked/.liveness.warning → warn`，`heartbeat/memory.sample → debug`，其余 `info`）、用 `inferLogLevel` + `formatLogMessage` 拼成可读的一行。改 logs handler 时**不要**重新写成 `buffer.recent({ type: "log.record" })`——那是死路。`component` 过滤改为 substring 匹配（精确 equality 会误伤所有自动派生的 component 名）。
+
+15. **`sessionsAlerted` 只算 `session.stalled` / `session.stuck`**（v0.6.1 修复）：`isSessionAlertEvent`（`src/pipeline/extractors.ts`）和 windows 计算（`src/pipeline/aggregator.ts: computeWindow`）只统计 host 的 per-session attention 检查输出（`diagnostic.ts:810-822`），**不要**重新把 `diagnostic.liveness.warning` 加回去 —— host 在正常 GC / CPU spike 时就会 emit liveness.warning，会让总览页 stat card 假阳性发红。原始 liveness.warning 事件仍在 buffer 里，事件页和日志页能看到。Overview stat card 也**不要**再加 "stalled / stuck" 的 delta 文案（曾经那条副标题在 stat card 数值为 0 时也显示，让人误以为有真会话卡死）。
+
+16. **审计内容默认大放行 `contentMaxBytes`**（v0.6.0）：默认值 1 MiB（schema cap 16 MiB，类型在 `src/types.ts: DEFAULT_MONITOR_CONFIG.audit` 和 schema 在 `openclaw.plugin.json`）。原来的 16 KiB 默认会把一个普通 prompt 切成 `…[truncated]`，让 ConversationDetail 页看不到完整内容。如果之后觉得磁盘膨胀严重，**不要**降回 16K —— 优先调 `retainDays`（默认 3 天），或者引入逐字段 hash 化策略，不要用截断当压缩。`MAX_HISTORY_ITEMS = 64` 限制的是 history 数组长度，跟单段内容字节数无关。
+
+17. **对话审计支持 `?groupBy=sessionKey`**（v0.6.0）：`/api/monitor/conversations` 默认仍返回 flat `conversations[]`（向后兼容），加 `?groupBy=sessionKey` 时改返回 `sessions[].conversations[]` 嵌套结构（`src/audit/conversation-routes.ts: groupBySession`）。每个 SessionGroup 聚合 runCount / totalTokensIn/Out / hasError / lastSeenAt。UI 默认走 groupBy 路径（`Conversations.tsx` 调 `api.conversationsBySession`），渲染可折叠面板。无 sessionKey 的旧记录归入 `_ungrouped` 桶。改 list handler 时保留两种返回 shape，**不要**默认只返回 grouped——历史 API 客户可能直接读 flat。
 
 ## 与 OpenClaw host 的接口契约
 
