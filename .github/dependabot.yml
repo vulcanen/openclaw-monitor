@@ -6,6 +6,12 @@ version: 2
 # vitest 2→4) don't land bundled with their tightly-coupled peer plugins
 # in a single PR that's impossible to verify atomically. The only group
 # we accept is @types/* since type-only bumps can't break runtime.
+#
+# Note on labels: we don't declare any here on purpose. Dependabot does
+# NOT auto-create missing labels — if you list a label that doesn't yet
+# exist on the repo it treats it as a configuration error and stops
+# opening PRs. If you want labels, create them in repo Settings → Labels
+# first, then add them here.
 updates:
   - package-ecosystem: "npm"
     directory: "/"
@@ -16,9 +22,6 @@ updates:
       timezone: "Asia/Shanghai"
     open-pull-requests-limit: 5
     versioning-strategy: increase
-    labels:
-      - "dependencies"
-      - "backend"
     groups:
       types:
         patterns:
@@ -33,9 +36,6 @@ updates:
       timezone: "Asia/Shanghai"
     open-pull-requests-limit: 5
     versioning-strategy: increase
-    labels:
-      - "dependencies"
-      - "ui"
     groups:
       types:
         patterns:
@@ -45,6 +45,3 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    labels:
-      - "dependencies"
-      - "ci"
