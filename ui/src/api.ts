@@ -262,6 +262,61 @@ export const api = {
     getJson<{ conversation: ConversationRecord }>(
       `/conversations/${encodeURIComponent(runId)}`,
     ),
+  alertsRules: () =>
+    getJson<{ running: boolean; rules: AlertRule[] }>("/alerts/rules"),
+  alertsActive: () => getJson<{ active: ActiveAlert[] }>("/alerts/active"),
+  alertsHistory: (limit = 100) =>
+    getJson<{ count: number; entries: AlertHistoryEntry[] }>(
+      `/alerts/history?limit=${limit}`,
+    ),
+};
+
+export type AlertSeverity = "info" | "warn" | "error";
+
+export type AlertRule = {
+  id: string;
+  name: string;
+  description?: string;
+  metric: string;
+  window: "1m" | "5m" | "15m" | "1h";
+  op: ">" | ">=" | "<" | "<=" | "==";
+  threshold: number;
+  severity?: AlertSeverity;
+  cooldownSec?: number;
+  channels: string[];
+  notifyOnResolve?: boolean;
+};
+
+export type ActiveAlert = {
+  ruleId: string;
+  ruleName: string;
+  severity: AlertSeverity;
+  metric: string;
+  window: "1m" | "5m" | "15m" | "1h";
+  op: AlertRule["op"];
+  threshold: number;
+  lastValue: number | null;
+  firedAt: string;
+  lastNotifiedAt: string;
+};
+
+export type AlertHistoryEntry = {
+  capturedAt: string;
+  type: "fired" | "renotified" | "resolved";
+  ruleId: string;
+  ruleName: string;
+  severity: AlertSeverity;
+  metric: string;
+  window: "1m" | "5m" | "15m" | "1h";
+  op: AlertRule["op"];
+  threshold: number;
+  value: number | null;
+  notifications: Array<{
+    channelId: string;
+    kind: "webhook" | "dingtalk";
+    ok: boolean;
+    error?: string;
+  }>;
 };
 
 export type StreamEvent = {

@@ -119,6 +119,126 @@
             "description": "When true (default in v0.5.0+), the plugin auto-writes plugins.allow and plugins.entries.openclaw-monitor.hooks.allowConversationAccess on first start so audit works with zero manual setup. Set false if you want explicit operator opt-in via `openclaw monitor setup --audit`. Auto-write logs a loud warn and requires a gateway restart to take effect."
           }
         }
+      },
+      "alerts": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Threshold-based alert engine (v0.7.0+). Evaluates rule conditions against the rolling-window metrics every `evaluationIntervalSec` and pushes notifications to configured channels (generic webhook / DingTalk custom robot). Disabled by default — set alerts.enabled=true and add at least one channel + one rule to activate.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Master switch. When false the engine doesn't start regardless of the rules array."
+          },
+          "evaluationIntervalSec": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 600,
+            "default": 30,
+            "description": "How often (in seconds) the engine compares each rule's metric to its threshold. Lower = faster reaction but more CPU; 30s is fine for most operational SLOs."
+          },
+          "channels": {
+            "type": "object",
+            "description": "Notification destinations keyed by an arbitrary channel id. Rules reference these ids in their `channels: []` array. At least one channel must be defined or rules silently fail their delivery step.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": ["webhook", "dingtalk"],
+                  "description": "`webhook` POSTs a generic JSON payload (AlertNotification shape). `dingtalk` posts a markdown card to a DingTalk custom robot."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Full destination URL. For DingTalk include the `access_token` query parameter."
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Optional extra HTTP headers (webhook channel only — DingTalk uses fixed JSON content-type)."
+                },
+                "secret": {
+                  "type": "string",
+                  "description": "DingTalk only. Optional HMAC-SHA256 signing secret; when present, every request is signed with timestamp + sign query parameters per DingTalk custom-robot security rules."
+                },
+                "atMobiles": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "DingTalk only. Phone numbers to @-mention in the alert message."
+                },
+                "atAll": {
+                  "type": "boolean",
+                  "description": "DingTalk only. Set true to @everyone in the target group."
+                }
+              },
+              "required": ["kind", "url"]
+            }
+          },
+          "rules": {
+            "type": "array",
+            "description": "Alert rule list. Each rule watches one rolling-window metric and fires when the comparison `metric op threshold` is true for a single evaluation cycle.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable identifier (a-z, 0-9, -). Used to correlate firing/resolution state across restarts."
+                },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "metric": {
+                  "enum": [
+                    "modelCalls",
+                    "modelErrors",
+                    "modelP95Ms",
+                    "toolExecs",
+                    "toolErrors",
+                    "toolBlocked",
+                    "messagesDelivered",
+                    "messageErrors",
+                    "webhookEvents",
+                    "webhookErrors",
+                    "sessionsAlerted"
+                  ],
+                  "description": "Which WindowSnapshot field to compare. See src/types.ts: WindowSnapshot."
+                },
+                "window": {
+                  "enum": ["1m", "5m", "15m", "1h"],
+                  "description": "Which rolling window to read the metric from."
+                },
+                "op": {
+                  "enum": [">", ">=", "<", "<=", "=="],
+                  "description": "Comparison operator."
+                },
+                "threshold": {
+                  "type": "number"
+                },
+                "severity": {
+                  "enum": ["info", "warn", "error"],
+                  "default": "warn"
+                },
+                "cooldownSec": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 86400,
+                  "default": 300,
+                  "description": "Minimum seconds between repeated firing notifications. The engine keeps re-evaluating during this window but suppresses notifications."
+                },
+                "channels": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Channel ids (keys of alerts.channels) to notify on fire / resolve."
+                },
+                "notifyOnResolve": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "required": ["id", "name", "metric", "window", "op", "threshold", "channels"]
+            }
+          }
+        }
       }
     }
   }

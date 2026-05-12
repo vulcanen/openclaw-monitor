@@ -14,6 +14,7 @@ const NAV_ITEMS: Array<{ to: string; key: StringKey }> = [
   { to: "/runs", key: "nav.runs" },
   { to: "/conversations", key: "nav.conversations" },
   { to: "/logs", key: "nav.logs" },
+  { to: "/alerts", key: "nav.alerts" },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
