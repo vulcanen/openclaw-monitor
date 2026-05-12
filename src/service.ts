@@ -42,6 +42,7 @@ import { createDailyCostStore } from "./costs/daily-store.js";
 import { createCostsHandler } from "./costs/rest-routes.js";
 import { createDailyCostStoreRef } from "./costs/store-ref.js";
 import { createPricingRef } from "./probes/hook-metrics.js";
+import { createInsightsRoutes } from "./insights/rest-routes.js";
 import {
   DEFAULT_MONITOR_CONFIG,
   type HttpRouteParams,
@@ -480,6 +481,44 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
         dailyStoreRef: dailyCostStoreRef,
       }),
     },
+    // ── Insights / Top-N drill-downs (v0.9.0+) ──────────────────────────
+    ...(() => {
+      const insights = createInsightsRoutes({
+        buffer,
+        conversationProbe,
+        conversationStoreRef,
+      });
+      return [
+        {
+          path: "/api/monitor/insights/slow-calls",
+          auth: "gateway" as const,
+          match: "exact" as const,
+          gatewayRuntimeScopeSurface: "trusted-operator" as const,
+          handler: insights.slowCallsHandler,
+        },
+        {
+          path: "/api/monitor/insights/heavy-conversations",
+          auth: "gateway" as const,
+          match: "exact" as const,
+          gatewayRuntimeScopeSurface: "trusted-operator" as const,
+          handler: insights.heavyConversationsHandler,
+        },
+        {
+          path: "/api/monitor/insights/error-clusters",
+          auth: "gateway" as const,
+          match: "exact" as const,
+          gatewayRuntimeScopeSurface: "trusted-operator" as const,
+          handler: insights.errorClustersHandler,
+        },
+        {
+          path: "/api/monitor/insights/tool-failures",
+          auth: "gateway" as const,
+          match: "exact" as const,
+          gatewayRuntimeScopeSurface: "trusted-operator" as const,
+          handler: insights.toolFailuresHandler,
+        },
+      ];
+    })(),
   ];
 
   if (config.ui.enabled) {

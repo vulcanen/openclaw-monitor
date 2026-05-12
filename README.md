@@ -13,6 +13,7 @@ Real-time monitoring plugin for OpenClaw. Subscribes to the internal diagnostic 
 - **Conversation audit** *(optional)*: captures the four touchpoints of a conversation — project → OpenClaw → LLM → OpenClaw → project — across multi-hop LLM calls; the list groups by `sessionKey` with collapsible panels, the detail view shows full prompts and responses (1 MiB per-segment cap by default)
 - **Alert engine** *(optional)*: periodically evaluates rolling-window metrics against threshold rules; on match, pushes to a generic webhook or DingTalk custom robot; supports cooldown and resolve notifications; active alerts / rule state / 24h history visible on the Alerts page
 - **Cost / token economics** *(needs audit gate + upstream usage)*: configurable price table per provider/model (per 1k tokens for input / output / cacheRead / cacheWrite); rolling-window cost figures + persistent today / this-week / this-month / last-30-days totals (UTC); per-model / per-channel / per-source breakdown on the Costs page. Token figures come from the `llm_output` hook's `usage` block — if your upstream LLM provider doesn't return `usage` in its OpenAI-compat response, this page will stay at 0 (the Costs page detects and surfaces this).
+- **Insights / Top-N drill-downs**: turns rolled-up metrics into clickable individuals — slowest `model.call.completed`, top conversations by token usage, error clusters by `provider × model × errorCategory`, per-tool failure-rate ranking; each row links into the Run Detail / Conversation Detail page. Time window selectable (15m / 1h / 6h / 24h).
 - **Live stream**: SSE push at `/api/monitor/stream`, the dashboard subscribes automatically
 - **Zero external dependencies**: JSONL files for persistence, partitioned by date with background retention; no native modules
 - **i18n**: Chinese by default, switch to English with one click
@@ -171,6 +172,10 @@ All `/api/monitor/*` routes require `Authorization: Bearer <gateway-operator-tok
 | `GET /api/monitor/alerts/active` | Currently firing alerts |
 | `GET /api/monitor/alerts/history?limit=` | Last 24h of alert events (fired / renotified / resolved) |
 | `GET /api/monitor/costs` | Cost snapshot: sinceStart / windows / today / thisWeek / thisMonth / 30-day daily trend + per model / channel / source breakdown |
+| `GET /api/monitor/insights/slow-calls?windowSec=&limit=` | Slowest model.call.completed inside the window |
+| `GET /api/monitor/insights/heavy-conversations?windowSec=&limit=` | Conversations ordered by total token usage |
+| `GET /api/monitor/insights/error-clusters?windowSec=&limit=` | model.call.error clustered by provider × model × errorCategory |
+| `GET /api/monitor/insights/tool-failures?windowSec=&limit=` | Per-tool failure count + rate |
 | `GET /monitor/*` | Bundled dashboard |
 
 ## Privacy and storage

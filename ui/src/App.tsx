@@ -6,6 +6,7 @@ import { Channels } from "./pages/Channels.js";
 import { ConversationDetail } from "./pages/ConversationDetail.js";
 import { Conversations } from "./pages/Conversations.js";
 import { Costs } from "./pages/Costs.js";
+import { Insights } from "./pages/Insights.js";
 import { Logs } from "./pages/Logs.js";
 import { Models } from "./pages/Models.js";
 import { Overview } from "./pages/Overview.js";
@@ -27,6 +28,7 @@ export function App() {
           <Route path="/sources" element={<Sources />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/runs/:runId" element={<RunDetail />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/conversations/:runId" element={<ConversationDetail />} />
           <Route path="/costs" element={<Costs />} />
