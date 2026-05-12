@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout.js";
 import { TokenGate } from "./components/TokenGate.js";
+import { Alerts } from "./pages/Alerts.js";
 import { Channels } from "./pages/Channels.js";
 import { ConversationDetail } from "./pages/ConversationDetail.js";
 import { Conversations } from "./pages/Conversations.js";
@@ -28,6 +29,7 @@ export function App() {
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/conversations/:runId" element={<ConversationDetail />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/alerts" element={<Alerts />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </Layout>

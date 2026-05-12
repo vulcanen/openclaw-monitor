@@ -1,5 +1,7 @@
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import type { AlertsConfig } from "./alerts/types.js";
+import { DEFAULT_ALERTS_CONFIG } from "./alerts/types.js";
 
 export type EventType = DiagnosticEventPayload["type"];
 
@@ -110,6 +112,7 @@ export type MonitorConfig = {
     retainDays: number;
     captureSystemPrompt: boolean;
   };
+  alerts: AlertsConfig;
 };
 
 export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
@@ -129,6 +132,7 @@ export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
     retainDays: 3,
     captureSystemPrompt: true,
   },
+  alerts: DEFAULT_ALERTS_CONFIG,
 };
 
 export type HttpRouteParams = Parameters<OpenClawPluginApi["registerHttpRoute"]>[0];

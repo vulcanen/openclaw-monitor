@@ -884,3 +884,170 @@ describe("conversation probe", () => {
     }
   });
 });
+
+describe("alert engine (v0.7)", () => {
+  const setup = async () => {
+    const { createAggregator } = await import("./pipeline/aggregator.js");
+    const { createAlertEngine } = await import("./alerts/engine.js");
+    const { DEFAULT_ALERTS_CONFIG } = await import("./alerts/types.js");
+    const aggregator = createAggregator();
+    return { aggregator, createAlertEngine, DEFAULT_ALERTS_CONFIG };
+  };
+
+  // Replace global fetch with a recorder so dispatcher integration runs end-
+  // to-end without actually hitting the network. We assert the rule lifecycle
+  // through the recorded call list.
+  const installFetchRecorder = () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const original = globalThis.fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = typeof input === "string" ? input : (input as URL).toString();
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ url, body });
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    return {
+      calls,
+      restore: () => {
+        (globalThis as unknown as { fetch: typeof fetch }).fetch = original;
+      },
+    };
+  };
+
+  it("fires once when a metric crosses the threshold and stays quiet during cooldown", async () => {
+    const { aggregator, createAlertEngine } = await setup();
+    // Force the aggregator into "10 model errors in 5m": ingest 10 error events.
+    for (let i = 0; i < 10; i += 1) {
+      aggregator.ingest(
+        makeEvent("model.call.error", { errorCategory: "rate-limit" }),
+        Date.now(),
+      );
+    }
+    const recorder = installFetchRecorder();
+    const engine = createAlertEngine({
+      aggregator,
+      initialConfig: {
+        enabled: true,
+        evaluationIntervalSec: 30,
+        channels: { hook: { kind: "webhook", url: "https://example.test/hook" } },
+        rules: [
+          {
+            id: "r1",
+            name: "errors high",
+            metric: "modelErrors",
+            window: "5m",
+            op: ">",
+            threshold: 5,
+            channels: ["hook"],
+            cooldownSec: 600,
+          },
+        ],
+      },
+    });
+    try {
+      await engine.evaluateNow();
+      expect(engine.active()).toHaveLength(1);
+      expect(recorder.calls).toHaveLength(1);
+      const first = recorder.calls[0]?.body as { type: string };
+      expect(first?.type).toBe("fired");
+
+      // Second cycle within cooldown: re-evaluation must NOT re-notify.
+      await engine.evaluateNow();
+      expect(recorder.calls).toHaveLength(1);
+    } finally {
+      recorder.restore();
+    }
+  });
+
+  it("emits a resolved event when the metric goes back under threshold", async () => {
+    const { aggregator, createAlertEngine } = await setup();
+    for (let i = 0; i < 10; i += 1) {
+      aggregator.ingest(makeEvent("model.call.error"), Date.now());
+    }
+    const recorder = installFetchRecorder();
+    const engine = createAlertEngine({
+      aggregator,
+      initialConfig: {
+        enabled: true,
+        evaluationIntervalSec: 30,
+        channels: { hook: { kind: "webhook", url: "https://example.test/hook" } },
+        rules: [
+          {
+            id: "r1",
+            name: "errors high",
+            metric: "modelErrors",
+            window: "1h",
+            op: ">",
+            threshold: 5,
+            channels: ["hook"],
+            cooldownSec: 600,
+          },
+        ],
+      },
+    });
+    try {
+      await engine.evaluateNow();
+      expect(engine.active()).toHaveLength(1);
+      // Reset aggregator state so the metric drops to 0.
+      aggregator.reset();
+      await engine.evaluateNow();
+      expect(engine.active()).toHaveLength(0);
+      const types = recorder.calls.map((c) => (c.body as { type: string }).type);
+      expect(types).toEqual(["fired", "resolved"]);
+      const hist = engine.history.list();
+      const histTypes = hist.map((h) => h.type);
+      expect(histTypes).toContain("fired");
+      expect(histTypes).toContain("resolved");
+    } finally {
+      recorder.restore();
+    }
+  });
+
+  it("dingtalk channel signs the request when a secret is configured", async () => {
+    const { __testing } = await import("./alerts/channels/dingtalk.js");
+    const url = "https://oapi.dingtalk.com/robot/send?access_token=abc";
+    const signed = __testing.signRequest(url, "SEC_test_secret");
+    expect(signed).toMatch(/&timestamp=\d+/);
+    expect(signed).toMatch(/&sign=/);
+    // sign is URL-encoded base64; can't be empty.
+    const signValue = new URL(signed).searchParams.get("sign");
+    expect(signValue && signValue.length > 0).toBe(true);
+  });
+
+  it("does not fire when the engine is disabled even with crossing metrics", async () => {
+    const { aggregator, createAlertEngine } = await setup();
+    for (let i = 0; i < 10; i += 1) {
+      aggregator.ingest(makeEvent("model.call.error"), Date.now());
+    }
+    const recorder = installFetchRecorder();
+    const engine = createAlertEngine({
+      aggregator,
+      initialConfig: {
+        enabled: false,
+        evaluationIntervalSec: 30,
+        channels: { hook: { kind: "webhook", url: "https://example.test/hook" } },
+        rules: [
+          {
+            id: "r1",
+            name: "errors high",
+            metric: "modelErrors",
+            window: "5m",
+            op: ">",
+            threshold: 5,
+            channels: ["hook"],
+          },
+        ],
+      },
+    });
+    try {
+      await engine.evaluateNow();
+      expect(engine.active()).toHaveLength(0);
+      expect(recorder.calls).toHaveLength(0);
+    } finally {
+      recorder.restore();
+    }
+  });
+});

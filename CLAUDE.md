@@ -136,6 +136,14 @@
 
 19. **PC 端 dashboard，不做移动端**（v0.6.3 确立）：详见 UI 规则 #5。不要为 < 720px / 触屏 / 移动浏览器写代码 —— 用户场景是运维 PC，目标视口 1024px+。`styles.css` 只保留 1100px 那档（PC split-screen / 缩窗）。任何后续 UI 重构如果引入移动端布局，先回这里读一遍。
 
+20. **告警引擎是 in-process setInterval，不持久化**（v0.7.0）：`src/alerts/engine.ts` 在 plugin 进程内跑评估循环（默认 30s），状态机（活跃告警 Map + history ring buffer）**全部在内存里**，gateway 重启后会丢。理由：告警是运营信号不是审计日志，丢了再触发一次问题不大；持久化会引入 jsonl 双写复杂度。如果未来需要"重启后继续抑制冷却中告警"再加 state file。**channels 必须从 `alerts.channels` 字典里按 id 解析**（`src/alerts/dispatcher.ts: dispatchNotification`），不要让 rule 直接内嵌 URL，因为同一通道经常被多条 rule 复用。**evaluateNow** 是给测试用的同步入口，生产路径只走 `start()` 启动的定时器。`history` 保留 24h 或 200 条（先到先除），靠 `src/alerts/history.ts`。
+
+21. **DingTalk 签名实现位置固定**（v0.7.0）：`src/alerts/channels/dingtalk.ts: signRequest` 用 `node:crypto` 的 `createHmac("sha256", secret)`，签名格式严格按 DingTalk 文档（`timestamp + "\n" + secret` → base64-hmac-sha256 → URL encode）。任何"看起来等价"的改写（比如把 `\n` 换成空格、把 base64 换成 hex）都会让钉钉返回 errcode=310000。已经在测试里固定（`alert engine > dingtalk channel signs the request`）。DingTalk 也支持"关键词"安全模式（消息含约定关键词即可），所以 rule.name 默认就拼进 markdown title —— 不要把 name 改成 emoji-only 或纯数字。
+
+22. **alerts 评估只读 windows snapshot，不依赖事件**（v0.7.0）：rule 的 metric 字段对应 `WindowSnapshot` 的 key（src/types.ts），engine 每次 tick 调 `aggregator.windows()` 一次性拿全部窗口，再按 rule 取值。**不要**改成订阅 fanout 或者每条事件评估一次 —— 那样会丢失窗口聚合语义，并且把 hot path 卡在评估循环上。规则评估是异步 fire-and-forget，dispatcher 内部容错每个 channel 的失败，永不向 engine.evaluate 抛错（否则 setInterval 会吞异常静默挂死）。
+
+23. **alerts UI 是只读列表**（v0.7.0）：`ui/src/pages/Alerts.tsx` 只渲染 rules / active / history 三个表，**不做 CRUD**。规则编辑唯一入口是 `~/.openclaw/openclaw.json`，改完重启 gateway。理由：把可视化编辑做到 v0.7 会让 UI 工作量 ×3，先把数据通路打通；v0.8+ 真有用户反馈再考虑加。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：

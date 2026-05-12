@@ -32,6 +32,12 @@ import {
   createConversationsListHandler,
 } from "./audit/conversation-routes.js";
 import { createConversationStoreRef } from "./audit/store-ref.js";
+import { createAlertEngine } from "./alerts/engine.js";
+import {
+  createAlertsActiveHandler,
+  createAlertsHistoryHandler,
+  createAlertsRulesHandler,
+} from "./alerts/rest-routes.js";
 import {
   DEFAULT_MONITOR_CONFIG,
   type HttpRouteParams,
@@ -56,6 +62,16 @@ function mergeConfig(input?: Partial<MonitorConfig>): MonitorConfig {
     ui: { ...DEFAULT_MONITOR_CONFIG.ui, ...input?.ui },
     stream: { ...DEFAULT_MONITOR_CONFIG.stream, ...input?.stream },
     audit: { ...DEFAULT_MONITOR_CONFIG.audit, ...input?.audit },
+    alerts: {
+      ...DEFAULT_MONITOR_CONFIG.alerts,
+      ...input?.alerts,
+      // Channels/rules are dictionary/array — shallow spread would replace
+      // them wholesale, which is exactly what we want (operator-defined
+      // config overrides defaults). Defaults for these are empty so this is
+      // a no-op when unset.
+      channels: input?.alerts?.channels ?? DEFAULT_MONITOR_CONFIG.alerts.channels,
+      rules: input?.alerts?.rules ?? DEFAULT_MONITOR_CONFIG.alerts.rules,
+    },
   };
 }
 
@@ -111,6 +127,11 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
     aggregator,
     runsTracker,
     conversationProbe,
+  });
+
+  const alertEngine = createAlertEngine({
+    aggregator,
+    initialConfig: config.alerts,
   });
 
   const resolveStorageRoot = (ctx: OpenClawPluginServiceContext): string => {
@@ -199,9 +220,24 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       }
 
       fanout.start();
+
+      alertEngine.setConfig(config.alerts);
+      if (config.alerts.enabled && config.alerts.rules.length > 0) {
+        alertEngine.start();
+        ctx.logger?.info?.(
+          `[${PLUGIN_ID}] alert engine started: ${config.alerts.rules.length} rule(s), ${
+            Object.keys(config.alerts.channels).length
+          } channel(s)`,
+        );
+      } else if (config.alerts.enabled) {
+        ctx.logger?.warn?.(
+          `[${PLUGIN_ID}] alerts.enabled is true but no rules configured — nothing to evaluate`,
+        );
+      }
     },
     stop() {
       fanout.stop();
+      alertEngine.stop();
       retention?.stop();
       retention = undefined;
       if (auditRetentionTimer) {
@@ -327,6 +363,27 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
         probe: conversationProbe,
         storeRef: conversationStoreRef,
       }),
+    },
+    {
+      path: "/api/monitor/alerts/rules",
+      auth: "gateway",
+      match: "exact",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+      handler: createAlertsRulesHandler(alertEngine),
+    },
+    {
+      path: "/api/monitor/alerts/active",
+      auth: "gateway",
+      match: "exact",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+      handler: createAlertsActiveHandler(alertEngine),
+    },
+    {
+      path: "/api/monitor/alerts/history",
+      auth: "gateway",
+      match: "exact",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+      handler: createAlertsHistoryHandler(alertEngine),
     },
   ];
 
