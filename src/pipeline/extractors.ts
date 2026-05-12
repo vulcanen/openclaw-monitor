@@ -104,16 +104,41 @@ export function isMessageQueuedEvent(event: DiagnosticEventPayload): boolean {
 }
 
 // Classifies events by entry path (Control UI, OpenAI-compatible API, channel
-// plugin, ...). The classification leans on the existing `channel` field that
-// OpenClaw stamps on each event:
-//   - "webchat"    → OpenAI-compatible HTTP API (`/v1/chat/completions`)
-//   - "dashboard"  → OpenClaw Control UI built-in chat
-//   - <name>       → channel plugin (telegram, discord, feishu, etc.)
+// plugin, internal trigger, ...).
+//
+// Important: OpenClaw's INTERNAL_MESSAGE_CHANNEL constant is literally the
+// string "webchat" (host: src/utils/message-channel-constants.ts). It covers
+// EVERY non-channel-plugin entry — `/v1/chat/completions`, the Control UI
+// built-in chat, heartbeat / cron-driven internal runs — so the `channel`
+// field alone CANNOT distinguish those paths.
+//
+// We disambiguate by combining two hints the host actually sets reliably:
+//   1. `runId` prefix — the most stable signal:
+//        "chatcmpl_*" → OpenAI compat HTTP (openai-http.ts builds this)
+//        "ctrl_*"     → Control UI (server-chat.ts builds this)
+//        other        → internal-triggered (heartbeat / cron / spawn)
+//      Empirically the host sets `trigger="user"` for BOTH OpenAI compat
+//      and Control UI agent runs, so trigger alone cannot tell them apart.
+//   2. `trigger` — used as a tie-break / for the channel-message audit
+//      path where conversation-probe synthesises trigger="channel-message".
+//
+// Channels that aren't "webchat" come from an explicit channel plugin
+// (telegram, discord, feishu, etc.) and pass through as `channel:<name>`.
 export function extractSource(dims: EventDimensions): string | undefined {
   const channel = dims.channel;
   if (!channel) return undefined;
-  if (channel === "webchat") return "openai-api";
-  if (channel === "dashboard") return "control-ui";
+  if (channel === "webchat") {
+    const runId = dims.runId;
+    if (runId?.startsWith("chatcmpl_")) return "openai-api";
+    if (runId?.startsWith("ctrl_")) return "control-ui";
+    const trigger = dims.trigger;
+    if (trigger === "channel-message") return "control-ui";
+    if (trigger === "heartbeat" || trigger === "cron" || trigger === "webhook") {
+      return `internal:${trigger}`;
+    }
+    if (trigger === "user") return "openai-api";
+    return trigger ? `webchat:${trigger}` : "webchat";
+  }
   return `channel:${channel}`;
 }
 
