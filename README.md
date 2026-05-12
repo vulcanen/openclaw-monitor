@@ -182,4 +182,4 @@ All `/api/monitor/*` routes require `Authorization: Bearer <gateway-operator-tok
 
 ## License
 
-UNLICENSED
+MIT — see [LICENSE](./LICENSE).

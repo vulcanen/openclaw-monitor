@@ -258,6 +258,46 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
         );
       }
 
+      // ── Aggregator + buffer replay from today's events.jsonl ──────────
+      // The aggregator (channels / models / sources / tools / windows) and
+      // ring buffer are entirely in-memory; without replay they start empty
+      // on every gateway restart and the Channels / Sources / Models /
+      // Tools pages look broken to operators until the next request
+      // arrives. We rebuild state by feeding back the events the JSONL
+      // store already captured. Replay happens *before* fanout.start so
+      // we don't race the first incoming live events.
+      const jsonlStoreNow = storeRef.get();
+      if (jsonlStoreNow) {
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const events = jsonlStoreNow.readEventsForDay(today);
+          let replayCount = 0;
+          for (const captured of events) {
+            try {
+              buffer.append(captured.event);
+              aggregator.ingest(captured.event, captured.capturedAt);
+              // runsTracker / conversationProbe are intentionally NOT
+              // replayed here — runs persist their own JSONL (loaded
+              // on-demand by /runs handler) and conversations live in
+              // audit/conversations-*.jsonl which is loaded separately.
+              // Re-injecting them here would double-count.
+              replayCount += 1;
+            } catch {
+              // best-effort
+            }
+          }
+          if (replayCount > 0) {
+            ctx.logger?.info?.(
+              `[${PLUGIN_ID}] replayed ${replayCount} events from today's JSONL — channels / sources / models dimensions restored`,
+            );
+          }
+        } catch (err) {
+          ctx.logger?.warn?.(
+            `[${PLUGIN_ID}] event replay failed (channels/sources start empty): ${String(err)}`,
+          );
+        }
+      }
+
       fanout.start();
 
       alertEngine.setConfig(config.alerts);

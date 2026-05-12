@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type ConversationSummary, type SessionGroup } from "../api.js";
+import { Pagination } from "../components/Pagination.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
 
@@ -21,10 +22,10 @@ function StatusTag({ status }: { status: ConversationSummary["status"] }) {
 
 function SessionRow({ group }: { group: SessionGroup }) {
   const { t } = useI18n();
-  // First-load: keep the freshest sessions expanded so a user landing on the
-  // page sees recent conversations without an extra click. Older sessions
-  // start collapsed and reveal their run list on demand.
-  const [open, setOpen] = useState(true);
+  // Sessions are collapsed by default. The list can grow long (dozens to
+  // hundreds of session entries once retention kicks in) and an all-
+  // expanded view drowns the page in tables; click a row to see its runs.
+  const [open, setOpen] = useState(false);
   const sessionLabel = group.sessionKey === "_ungrouped" ? "—" : group.sessionKey;
   return (
     <div
@@ -139,8 +140,15 @@ function SessionRow({ group }: { group: SessionGroup }) {
 
 export function Conversations() {
   const { t } = useI18n();
-  const fetcher = useMemo(() => () => api.conversationsBySession(100), []);
+  // Pull a generous slice so client-side paging has room; the API tops
+  // out at 500 sessions per response, plenty for a single dashboard view.
+  const fetcher = useMemo(() => () => api.conversationsBySession(500), []);
   const { data, error } = usePolling(fetcher, 5_000);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
+
+  const allSessions = data?.sessions ?? [];
+  const pagedSessions = allSessions.slice(page * pageSize, (page + 1) * pageSize);
 
   return (
     <div>
@@ -167,9 +175,19 @@ export function Conversations() {
 
       {data && data.sessions.length > 0 ? (
         <div>
-          {data.sessions.map((group) => (
+          {pagedSessions.map((group) => (
             <SessionRow key={group.sessionKey} group={group} />
           ))}
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={allSessions.length}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(0);
+            }}
+          />
         </div>
       ) : null}
     </div>

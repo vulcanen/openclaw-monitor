@@ -13,6 +13,13 @@ export const en: Strings = {
   "nav.alerts": "Alerts",
   "nav.costs": "Costs",
 
+  // Pagination
+  "pagination.range": "{start}–{end} of {total}",
+  "pagination.pageSize": "page size",
+  "pagination.pageOf": "page {page} / {total}",
+  "pagination.prev": "prev",
+  "pagination.next": "next",
+
   // Costs (v0.8.0+)
   "costs.title": "Costs / Token Economics",
   "costs.subtitle": "currency: {currency} · sourced from the llm_output hook, gated by audit · refreshed {time}",

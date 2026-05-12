@@ -1,6 +1,6 @@
 {
   "name": "@vulcanen/openclaw-monitor",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Self-contained real-time monitoring console for OpenClaw",
   "type": "module",
   "main": "./dist/index.js",
@@ -52,6 +52,6 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": false
 }

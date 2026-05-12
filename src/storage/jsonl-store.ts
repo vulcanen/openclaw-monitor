@@ -10,6 +10,15 @@ export type JsonlStore = {
   appendRun: (run: RunSnapshot) => void;
   readEvents: (params?: { since?: number; type?: EventType; limit?: number }) => CapturedEvent[];
   readRuns: (params?: { limit?: number }) => RunSnapshot[];
+  /**
+   * Iterate every CapturedEvent on disk for one calendar day, in original
+   * (append) order. Used by service startup to replay today's events
+   * into the aggregator + buffer so per-dimension rollups (channels,
+   * models, sources, tools) survive process restart. Returns [] for
+   * missing or empty days. Unlike `readEvents` there's no limit — the
+   * caller is expected to want everything.
+   */
+  readEventsForDay: (day: string) => CapturedEvent[];
   pruneOlderThan: (params: { eventsDays: number; runsDays: number }) => {
     eventFilesDeleted: number;
     runsTrimmed: number;
@@ -97,6 +106,23 @@ export function createJsonlStore(rootDir: string): JsonlStore {
     return out.reverse();
   };
 
+  const readEventsForDay: JsonlStore["readEventsForDay"] = (day) => {
+    const file = path.join(rootDir, `events-${day}.jsonl`);
+    const lines = safeReadLines(file);
+    const out: CapturedEvent[] = [];
+    for (const line of lines) {
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line) as CapturedEvent;
+        if (typeof parsed.capturedAt !== "number" || !parsed.event) continue;
+        out.push(parsed);
+      } catch {
+        // skip corrupt lines
+      }
+    }
+    return out;
+  };
+
   const readRuns: JsonlStore["readRuns"] = (params) => {
     const limit = Math.max(1, Math.min(params?.limit ?? 100, 1_000));
     const lines = safeReadLines(runsFile);
@@ -160,6 +186,7 @@ export function createJsonlStore(rootDir: string): JsonlStore {
   };
 
   return {
+    readEventsForDay,
     appendEvent,
     appendRun,
     readEvents,

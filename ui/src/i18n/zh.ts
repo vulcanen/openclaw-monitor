@@ -11,6 +11,13 @@ export const zh = {
   "nav.alerts": "告警",
   "nav.costs": "成本",
 
+  // Pagination
+  "pagination.range": "第 {start}–{end} 条 / 共 {total} 条",
+  "pagination.pageSize": "每页",
+  "pagination.pageOf": "第 {page} / {total} 页",
+  "pagination.prev": "上一页",
+  "pagination.next": "下一页",
+
   // Costs (v0.8.0+)
   "costs.title": "成本 / Token 经济学",
   "costs.subtitle": "货币：{currency} · 数据来自 llm_output hook，依赖 audit 安全门。更新时间：{time}",
