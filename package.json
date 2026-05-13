@@ -2,6 +2,14 @@
   "name": "@vulcanen/openclaw-monitor",
   "version": "0.9.7",
   "description": "Self-contained real-time monitoring console for OpenClaw",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vulcanen/openclaw-monitor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vulcanen/openclaw-monitor/issues"
+  },
+  "homepage": "https://github.com/vulcanen/openclaw-monitor#readme",
   "type": "module",
   "main": "./dist/index.js",
   "files": [
