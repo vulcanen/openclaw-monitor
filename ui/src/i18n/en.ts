@@ -169,9 +169,6 @@ export const en: Strings = {
   "empty.dataYet": "no data captured yet",
   "empty.logs": "no log records buffered",
   "empty.runs": "no runs match",
-  "empty.history": "(no history captured)",
-  "empty.input": "(no input)",
-  "empty.output": "(no output)",
 
   // Stat & chart labels
   "stat.modelCalls1m": "model calls (1m)",
@@ -305,26 +302,32 @@ export const en: Strings = {
   "conversationDetail.row.ended": "ended",
   "conversationDetail.row.durationMs": "duration ms",
   "conversationDetail.row.llmHops": "llm hops",
-  "conversationDetail.section.inbound": "① sender → OpenClaw",
-  "conversationDetail.section.llmInput": "② OpenClaw → LLM",
-  "conversationDetail.section.llmInputHop": "② OpenClaw → LLM (hop {n})",
-  "conversationDetail.section.llmOutput": "③ LLM → OpenClaw",
-  "conversationDetail.section.llmOutputHop": "③ LLM → OpenClaw (hop {n})",
-  "conversationDetail.section.outbound": "④ OpenClaw → sender",
-  "conversationDetail.label.prompt": "prompt",
-  "conversationDetail.label.system": "system",
   "conversationDetail.label.history": "session history ({count})",
   "conversationDetail.label.historyShort": "history ({count})",
   "conversationDetail.label.historyShowing": "showing {shown} of {total} messages",
   "conversationDetail.label.assistantText": "assistant text {n}",
   "conversationDetail.label.images": "{count} images",
-  "conversationDetail.label.tokens": "in {input} / out {output}",
-  "conversationDetail.empty.inbound":
-    "(no inbound captured · before_prompt_build hook did not fire for this run)",
-  "conversationDetail.empty.exchange": "(no llm_input / llm_output captured)",
-  "conversationDetail.empty.outbound":
-    "(no outbound captured · agent_end hook did not fire — likely abort/timeout)",
   "conversationDetail.row.success": "success",
+
+  // Timeline cards (v0.9.5)
+  "conversationDetail.timeline.empty": "No conversation events captured.",
+  "conversationDetail.timeline.inbound": "Inbound",
+  "conversationDetail.timeline.inboundSub": "sender → OpenClaw",
+  "conversationDetail.timeline.llmHop": "LLM call",
+  "conversationDetail.timeline.llmHopN": "LLM call · hop {n} of {total}",
+  "conversationDetail.timeline.outbound": "Outbound",
+  "conversationDetail.timeline.outboundOk": "success",
+  "conversationDetail.timeline.outboundFail": "failed",
+  "conversationDetail.timeline.outboundEmpty": "(outbound payload was empty)",
+  "conversationDetail.timeline.error": "Error",
+  "conversationDetail.timeline.systemPrompt": "system prompt",
+  "conversationDetail.timeline.userPrompt": "prompt",
+  "conversationDetail.timeline.assistantReply": "assistant response",
+  "conversationDetail.timeline.tokens": "in {input} · out {output}",
+  "conversationDetail.timeline.noInput": "(no input captured for this hop)",
+  "conversationDetail.timeline.noOutput": "No LLM output captured for this hop.",
+  "conversationDetail.timeline.noOutputHint":
+    "Common causes: ① host `hooks.allowConversationAccess` is off (run `openclaw monitor setup --audit`); ② the upstream LLM stream doesn't return usage / text (OpenAI-compat gateways need `compat.supportsUsageInStreaming: true`); ③ the provider adapter never fires the `llm_output` hook (check host logs).",
 
   // Time series chart
   "chart.noData": "no data yet",
