@@ -432,6 +432,7 @@ UI 是 React + Vite + Recharts 的内置仪表板（`ui/`），风格是 GitHub 
 - ❌ 把 `/monitor/*` 静态 UI 改回 `auth: "gateway"`（会让浏览器永远 401）
 - ❌ 在 `dependencies` 里加任何包（保持空）
 - ❌ 修改 git config（`user.email` / `user.name` 用户级已配置，不动）
+- ❌ commit message 里加 `Co-Authored-By: Claude <noreply@anthropic.com>` 或 `🤖 Generated with Claude Code` footer（公开 repo 的 Contributors 列表不应混入 AI 账户；项目仓库历史已有 20 条带 trailer 的 commit 保留不 rewrite，但**新 commit 一律不再追加**。Claude Code 用户应在自己的 `~/.claude/settings.json` 设 `"includeCoAuthoredBy": false` 抑制此默认行为；其他 AI 工具同理）
 - ❌ 在 `register(api)` 或 `service.start(ctx)` 里自动写 `plugins.allow` 或 `hooks.allowConversationAccess`（Claude Code harness 拦截此类自动提权——它在我们项目契约之上有独立的 security-gate 保护逻辑）。要走 `openclaw monitor setup [--audit]` CLI，由操作者显式触发。
 - ❌ 默认开启脱敏前直接捕获 prompt 内容并明文回显到外部日志
 

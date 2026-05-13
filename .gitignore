@@ -9,5 +9,7 @@ coverage/
 .env
 .env.local
 
-# Claude Code session artifacts (per-developer)
-.claude/
+# Claude Code session artifacts (per-developer) — but keep .claude/settings.json
+# in the repo as a team-level config (currently: includeCoAuthoredBy=false).
+.claude/*
+!.claude/settings.json
