@@ -965,6 +965,16 @@ describe("conversation probe", () => {
     expect((rec?.outbound?.messages[0] as { content?: string })?.content).toBe("FINAL_REPLY");
     expect(rec?.status).toBe("completed");
     expect(rec?.durationMs).toBe(99);
+    // v0.9.4 regression: in channel-based flows the record starts with a
+    // synthetic ctrl_* runId minted by message_received. Without runId
+    // promotion in findOrCreateRecord, the llm_output handler's runId-only
+    // lookup misses the record and llmOutputs stays empty — the LLM→OpenClaw
+    // section renders blank even though the hook fired with content.
+    expect(rec?.llmInputs).toHaveLength(1);
+    expect(rec?.llmOutputs).toHaveLength(1);
+    expect(rec?.llmOutputs[0]?.assistantTexts).toEqual(["FINAL_REPLY"]);
+    // runId should be the real harness runId, not the ctrl_* placeholder.
+    expect(rec?.runId).toBe("rX");
   });
 
   it("persists a completed conversation to the store", async () => {

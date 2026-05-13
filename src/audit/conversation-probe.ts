@@ -106,7 +106,21 @@ export function createConversationProbe(): ConversationProbe {
       const linkedRunId = state.bySessionKey.get(sessionKey);
       if (linkedRunId) {
         const linked = state.active.get(linkedRunId);
-        if (linked) return linked;
+        if (linked) {
+          // Promote synthetic runId to the real one when an agent harness
+          // run finally arrives. Without this re-key, the record stays
+          // indexed by `ctrl_<sessionKey>_<ts>` in state.active, and
+          // any handler that looks up by *runId only* (e.g. llm_output)
+          // would miss it — the LLM→OpenClaw section would stay empty
+          // for channel-based flows even though we did capture the data.
+          if (runId && runId !== linked.runId && linked.runId.startsWith("ctrl_")) {
+            state.active.delete(linked.runId);
+            linked.runId = runId;
+            state.active.set(runId, linked);
+            state.bySessionKey.set(sessionKey, runId);
+          }
+          return linked;
+        }
       }
     }
 
@@ -347,7 +361,15 @@ export function createConversationProbe(): ConversationProbe {
       if (!state.config.enabled) return;
       const runId = event.runId ?? ctx.runId;
       if (!runId) return;
-      const record = state.active.get(runId);
+      // Direct runId lookup is the fast path. Fall back to sessionKey if
+      // the record was created via message_received (synthetic runId) and
+      // before_prompt_build/llm_input hasn't promoted it yet — defensive
+      // belt against any ordering edge case.
+      let record = state.active.get(runId);
+      if (!record && ctx.sessionKey) {
+        const linkedRunId = state.bySessionKey.get(ctx.sessionKey);
+        if (linkedRunId) record = state.active.get(linkedRunId);
+      }
       if (!record) return;
       const truncatedTexts: string[] = [];
       let truncated = false;
