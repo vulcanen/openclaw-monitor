@@ -25,17 +25,26 @@
  *   - HTTPS enforcement (some operators run plain-http receivers)
  */
 
-import { isIPv6 } from "node:net";
+import { isIPv4, isIPv6 } from "node:net";
 
-const LITERAL_PRIVATE_HOST = [
+// Patterns that match against the hostname *only when it parses as IPv4*.
+// We split rejection into two layers so a legitimate hostname like
+// `127.example.com` or `cdn.10gen.net` doesn't trigger on a leading prefix
+// that happens to look like an IPv4 octet. The IPv4-shape patterns are
+// applied to dotted-quad strings only; the textual patterns (`localhost`,
+// IPv6 prefixes) are applied to the raw host.
+const IPV4_PRIVATE_PATTERN = [
   /^127\./, // IPv4 loopback
   /^10\./, // IPv4 RFC1918
   /^172\.(1[6-9]|2\d|3[01])\./, // IPv4 RFC1918
   /^192\.168\./, // IPv4 RFC1918
   /^169\.254\./, // IPv4 link-local (incl. AWS / GCP metadata 169.254.169.254)
-  /^0\.0\.0\.0$/, // any-interface
+  /^0\./, // IPv4 "this network" /8 (0.0.0.0/8) — Linux routes to localhost
+];
+const LITERAL_PRIVATE_HOST = [
   /^localhost$/i,
   /^::1$/, // IPv6 loopback
+  /^::$/, // IPv6 unspecified
   /^fe80:/i, // IPv6 link-local
   /^fc00:/i, // IPv6 ULA
   /^fd00:/i, // IPv6 ULA
@@ -74,8 +83,8 @@ function embeddedIPv4(host: string): string | undefined {
   // Anything else is a generic IPv6 address that doesn't encode IPv4.
   const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
   if (hex) {
-    const hi = parseInt(hex[1] as string, 16);
-    const lo = parseInt(hex[2] as string, 16);
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
     if (!Number.isNaN(hi) && !Number.isNaN(lo)) {
       return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
     }
@@ -87,44 +96,75 @@ export type ChannelUrlGuardOptions = {
   allowPrivateNetwork?: boolean;
 };
 
-export function assertSafeChannelUrl(
-  rawUrl: string,
-  opts: ChannelUrlGuardOptions = {},
-): URL {
+/**
+ * Stable string codes attached to Errors thrown by `assertSafeChannelUrl`.
+ * Callers (dispatcher, future alert-test endpoints) branch on `code`
+ * rather than parsing the message — text is for humans, code is for
+ * code.
+ *
+ * Kept as a plain object (not enum) per project convention: union literal
+ * types pair better with `instanceof` + property checks than enums do.
+ */
+export const URL_GUARD_ERROR_CODES = {
+  INVALID_URL: "URL_GUARD_INVALID",
+  BAD_SCHEME: "URL_GUARD_BAD_SCHEME",
+  PRIVATE_HOST: "URL_GUARD_PRIVATE_HOST",
+} as const;
+
+export type UrlGuardErrorCode = (typeof URL_GUARD_ERROR_CODES)[keyof typeof URL_GUARD_ERROR_CODES];
+
+function urlGuardError(code: UrlGuardErrorCode, message: string): Error {
+  const err = new Error(message) as Error & { code: UrlGuardErrorCode };
+  err.code = code;
+  return err;
+}
+
+export function assertSafeChannelUrl(rawUrl: string, opts: ChannelUrlGuardOptions = {}): URL {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new Error(`invalid URL: ${rawUrl}`);
+    throw urlGuardError(URL_GUARD_ERROR_CODES.INVALID_URL, `invalid URL: ${rawUrl}`);
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`only http/https URLs are allowed (got ${parsed.protocol})`);
+    throw urlGuardError(
+      URL_GUARD_ERROR_CODES.BAD_SCHEME,
+      `only http/https URLs are allowed (got ${parsed.protocol})`,
+    );
   }
   if (opts.allowPrivateNetwork === true) return parsed;
   const host = parsed.hostname;
   const reject = (): never => {
-    throw new Error(
+    throw urlGuardError(
+      URL_GUARD_ERROR_CODES.PRIVATE_HOST,
       `private / loopback / link-local hosts are blocked by default (${host}). ` +
         `If this is intentional, set allowPrivateNetwork: true on the channel.`,
     );
   };
+  // Textual / IPv6 patterns apply to the raw host string.
   for (const pattern of LITERAL_PRIVATE_HOST) {
     if (pattern.test(host)) reject();
   }
+  // IPv4 patterns apply only when the host actually parses as IPv4 —
+  // otherwise `cdn.10gen.net` would trip on `^10\.` and `127.example.com`
+  // on `^127\.`.
+  if (isIPv4(host)) {
+    for (const pattern of IPV4_PRIVATE_PATTERN) {
+      if (pattern.test(host)) reject();
+    }
+  }
   // IPv6-encoded IPv4 (e.g. `::ffff:7f00:1` ← `::ffff:127.0.0.1`). Extract
-  // the embedded IPv4 and re-run the IPv4 patterns against it.
+  // the embedded IPv4 and re-run the IPv4 patterns against it. Note: the
+  // unwrapped string is a dotted-quad we constructed, so isIPv4 will accept
+  // it; we still check explicitly to keep the contract crisp.
   const v4 = embeddedIPv4(host);
-  if (v4) {
-    for (const pattern of LITERAL_PRIVATE_HOST) {
+  if (v4 && isIPv4(v4)) {
+    for (const pattern of IPV4_PRIVATE_PATTERN) {
       if (pattern.test(v4)) reject();
     }
-    // Any address whose top 96 bits are zero and whose embedded IPv4 is
-    // 0.0.0.0/8 (CURRENT-NETWORK reserved, includes 0.0.0.0) is also
-    // unsafe — reject as a defensive default.
-    if (v4.startsWith("0.")) reject();
   }
   return parsed;
 }
 
 /** Exposed for tests. */
-export const __testing = { LITERAL_PRIVATE_HOST };
+export const __testing = { LITERAL_PRIVATE_HOST, IPV4_PRIVATE_PATTERN };

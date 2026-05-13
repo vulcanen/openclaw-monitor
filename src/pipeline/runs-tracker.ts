@@ -66,10 +66,7 @@ export function createRunsTracker(opts?: {
       return undefined;
     }
 
-    if (
-      event.type === "harness.run.completed" ||
-      event.type === "harness.run.error"
-    ) {
+    if (event.type === "harness.run.completed" || event.type === "harness.run.error") {
       const run = active.get(runId);
       if (!run) return undefined;
       const ended = capturedAtMs;

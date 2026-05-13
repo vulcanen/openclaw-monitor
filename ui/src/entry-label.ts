@@ -33,6 +33,12 @@ export function friendlyEntryLabel(t: TranslateFn, rawKey: string): string {
   return rawKey;
 }
 
+// Mirror of backend `INTERNAL_TRIGGER_NAMES` in src/pipeline/extractors.ts.
+// When adding a new internal trigger name, update both lists in the same
+// commit (decision: keep extractSource and inferEntryKey aligned —
+// CLAUDE.md decision #35).
+const INTERNAL_TRIGGER_NAMES = new Set(["heartbeat", "cron", "webhook"]);
+
 /**
  * Like extractSource on the backend but applied at the UI layer when we
  * only have the raw channel + trigger + runId (e.g. on a conversation
@@ -45,11 +51,17 @@ export function inferEntryKey(
   runId: string | undefined,
 ): string | undefined {
   if (!channelId) return undefined;
+  // Host-data quirk: ctx.channelId is sometimes set to a literal trigger
+  // name ("heartbeat" etc.) on internal agent runs. Route to internal:*
+  // before the channel:* fall-through.
+  if (INTERNAL_TRIGGER_NAMES.has(channelId)) {
+    return `internal:${channelId}`;
+  }
   if (channelId !== "webchat") return `channel:${channelId}`;
   if (runId?.startsWith("ctrl_")) return "control-ui";
   if (runId?.startsWith("chatcmpl_")) return "openai-api";
   if (trigger === "channel-message") return "control-ui";
-  if (trigger === "heartbeat" || trigger === "cron" || trigger === "webhook") {
+  if (trigger && INTERNAL_TRIGGER_NAMES.has(trigger)) {
     return `internal:${trigger}`;
   }
   if (trigger === "user") return "openai-api";

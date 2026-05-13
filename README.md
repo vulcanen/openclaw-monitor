@@ -6,15 +6,17 @@ Real-time monitoring plugin for OpenClaw. Subscribes to the internal diagnostic 
 
 ## Features
 
-- **Overview**: 1m / 5m / 15m / 1h rolling windows for model calls, error rate, P95 latency, session alerts
+- **Overview**: health banner (system-normal / attention / incident) + 1m / 5m / 15m / 1h rolling windows for model calls, error rate, P95 latency, session alerts; second row of lifecycle stats (active sessions, today's context-compactions, last gateway restart, persisted tool results); Top entry sources today panel
 - **Dimension rollups**: counts, error rate, token usage and latency quantiles broken down by channel, provider × model, tool, and source (OpenAI-compat API / Control UI / channel plugins)
 - **Run tracking**: harness run list with full event-trace drilldown for any single run
-- **Diagnostic event stream**: every captured event rendered as a log line with an inferred severity (error / warn / info / debug); filterable by level, component substring, event type
-- **Conversation audit** *(optional)*: list groups by `sessionKey` with collapsible panels; detail view is a **timeline of paired cards** — inbound / each LLM call (input + output in one card) / outbound / error sorted by capture time, **only rendering cards that have data**, half-captured hops show an inline diagnostic hint (1 MiB per-segment cap by default)
+- **Diagnostic event stream**: every captured event rendered as a log line with an inferred severity (error / warn / info / debug); filterable by level, component substring, **event-type prefix** (e.g. `model.*`, `tool.*`, `session.*`, `gateway.*`)
+- **Conversation audit** *(optional)*: list groups by `sessionKey` with collapsible panels and a **status filter** (all / errors only / successful only); detail view is a **timeline of paired cards** — inbound / each LLM call (input + output in one card) / outbound / error sorted by capture time, **only rendering cards that have data**, half-captured hops show an inline diagnostic hint (1 MiB per-segment cap by default). Stuck records (sender disconnected, host crash mid-run) are swept after 30 min and finalized as `abandoned` so memory stays bounded.
 - **Alert engine** *(optional)*: periodically evaluates rolling-window metrics against threshold rules; on match, pushes to a generic webhook or DingTalk custom robot; supports cooldown and resolve notifications; active alerts / rule state / 24h history visible on the Alerts page
 - **Cost / token economics** *(needs audit gate + upstream usage)*: configurable price table per provider/model (per 1k tokens for input / output / cacheRead / cacheWrite); rolling-window cost figures + persistent today / this-week / this-month / last-30-days totals (UTC); per-model / per-channel / per-source breakdown on the Costs page. Token figures come from the `llm_output` hook's `usage` block — if your upstream LLM provider doesn't return `usage` in its OpenAI-compat response, this page will stay at 0 (the Costs page detects and surfaces this).
 - **Insights / Top-N drill-downs**: turns rolled-up metrics into clickable individuals — slowest `model.call.completed`, top conversations by token usage, error clusters by `provider × model × errorCategory`, per-tool failure-rate ranking; each row links into the Run Detail / Conversation Detail page. Time window selectable (15m / 1h / 6h / 24h).
 - **Live stream**: SSE push at `/api/monitor/stream`, the dashboard subscribes automatically
+- **Lifecycle visibility**: session start/end, agent context compaction (before / after), tool-result persistence, and gateway start/stop are captured as synthetic events on the Logs and Events pages — use the type-prefix filter to drill into any one of them. A dedicated **Sessions** page surfaces the start/end/duration/reason view directly.
+- **Global time-window selector**: a single dropdown in the topbar applies across windowed pages; mirrored to URL hash (`?window=15m`) so deep links preserve the view
 - **Zero external dependencies**: JSONL files for persistence, partitioned by date with background retention; no native modules
 - **i18n**: Chinese by default, switch to English with one click
 
@@ -163,10 +165,10 @@ All `/api/monitor/*` routes require `Authorization: Bearer <gateway-operator-tok
 | `GET /api/monitor/sources` | Stats grouped by entry source (openai-api / control-ui / channel:*) |
 | `GET /api/monitor/runs?limit=` | Harness run list |
 | `GET /api/monitor/runs/:runId` | Single-run detail + event trace |
-| `GET /api/monitor/logs?level=&component=&type=` | Diagnostic event stream (filter by inferred level / component substring / event type) |
+| `GET /api/monitor/logs?level=&component=&type=&typePrefix=` | Diagnostic event stream (filter by inferred level / component substring / exact event type / event-type prefix e.g. `model.`) |
 | `GET /api/monitor/series?metric=&windowSec=` | 10-second-bucket time series |
 | `GET /api/monitor/stream` | SSE real-time event push |
-| `GET /api/monitor/conversations?limit=&groupBy=sessionKey` | Conversation audit list; `groupBy=sessionKey` returns sessions-of-runs nested shape |
+| `GET /api/monitor/conversations?limit=&groupBy=sessionKey&hasError=true\|false` | Conversation audit list; `groupBy=sessionKey` returns sessions-of-runs nested shape; `hasError` filters server-side |
 | `GET /api/monitor/conversations/:runId` | Full four-segment content of one conversation |
 | `GET /api/monitor/alerts/rules` | Current alert rules + engine running state |
 | `GET /api/monitor/alerts/active` | Currently firing alerts |

@@ -29,7 +29,11 @@ const NOT_FOUND_BODY = `<!doctype html><html><head><meta charset="utf-8"><title>
 
 function safeJoin(root: string, relative: string): string | undefined {
   const resolved = path.resolve(root, "." + (relative.startsWith("/") ? relative : `/${relative}`));
-  if (!resolved.startsWith(root)) return undefined;
+  // Plain `startsWith(root)` would accept a sibling directory like
+  // `${root}-evil` whose absolute path shares the same prefix string —
+  // standard path-traversal hardening requires the next character to be
+  // the platform separator (or equality for the root itself).
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return undefined;
   return resolved;
 }
 
@@ -63,7 +67,10 @@ export function createStaticUiHandler(opts: { basePath: string }): OpenClawPlugi
     if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
       res.statusCode = 200;
       res.setHeader("Content-Type", contentType(resolved));
-      res.setHeader("Cache-Control", relative === "/index.html" ? "no-cache" : "public, max-age=3600");
+      res.setHeader(
+        "Cache-Control",
+        relative === "/index.html" ? "no-cache" : "public, max-age=3600",
+      );
       fs.createReadStream(resolved).pipe(res);
       return true;
     }

@@ -44,9 +44,7 @@ export function RunDetail() {
                 </tr>
                 <tr>
                   <td>{t("runDetail.row.ended")}</td>
-                  <td>
-                    {data.run.endedAt ? new Date(data.run.endedAt).toLocaleString() : "—"}
-                  </td>
+                  <td>{data.run.endedAt ? new Date(data.run.endedAt).toLocaleString() : "—"}</td>
                 </tr>
                 <tr>
                   <td>{t("runDetail.row.durationMs")}</td>
@@ -84,17 +82,43 @@ export function RunDetail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.events.map((evt, idx) => (
-                    <tr key={`${evt.capturedAt}-${idx}`}>
-                      <td>{new Date(evt.capturedAt).toLocaleTimeString()}</td>
-                      <td>{evt.type}</td>
-                      <td>
-                        <code style={{ fontSize: 11 }}>
-                          {JSON.stringify(evt.payload).slice(0, 240)}
-                        </code>
-                      </td>
-                    </tr>
-                  ))}
+                  {data.events.map((evt, idx) => {
+                    const fullJson = JSON.stringify(evt.payload, null, 2);
+                    const preview = JSON.stringify(evt.payload);
+                    return (
+                      <tr key={`${evt.capturedAt}-${idx}`}>
+                        <td>{new Date(evt.capturedAt).toLocaleTimeString()}</td>
+                        <td>{evt.type}</td>
+                        <td>
+                          <details>
+                            <summary
+                              style={{
+                                cursor: "pointer",
+                                fontFamily: "var(--mono)",
+                                fontSize: 11,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                maxWidth: 480,
+                              }}
+                            >
+                              {preview.length > 240 ? `${preview.slice(0, 240)}…` : preview}
+                            </summary>
+                            <pre
+                              style={{
+                                marginTop: 6,
+                                fontSize: 11,
+                                maxHeight: 360,
+                                overflow: "auto",
+                              }}
+                            >
+                              {fullJson}
+                            </pre>
+                          </details>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

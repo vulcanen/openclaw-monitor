@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   api,
@@ -10,13 +10,7 @@ import {
 import { friendlyEntryLabel, inferEntryKey } from "../entry-label.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
-
-const WINDOW_OPTIONS: Array<{ value: number; key: string }> = [
-  { value: 15 * 60, key: "insights.window.15m" },
-  { value: 60 * 60, key: "insights.window.1h" },
-  { value: 6 * 60 * 60, key: "insights.window.6h" },
-  { value: 24 * 60 * 60, key: "insights.window.24h" },
-];
+import { useTimeWindow, WINDOW_TO_SECONDS } from "../time-window.js";
 
 function fmtMs(value: number): string {
   if (value < 1000) return `${value}ms`;
@@ -39,8 +33,9 @@ function fmtBytes(value: number | undefined): string {
   return `${(value / (1024 * 1024)).toFixed(2)}MB`;
 }
 
-function SampleRuns({ runIds }: { runIds: string[] }) {
+function SampleRuns({ runIds, lastSeenMs }: { runIds: string[]; lastSeenMs?: number }) {
   if (runIds.length === 0) return <span>—</span>;
+  const now = Date.now();
   return (
     <span style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
       {runIds.map((rid, idx) => (
@@ -49,17 +44,21 @@ function SampleRuns({ runIds }: { runIds: string[] }) {
           <Link to={`/runs/${encodeURIComponent(rid)}`}>{rid.slice(0, 12)}…</Link>
         </span>
       ))}
+      {lastSeenMs !== undefined ? (
+        // Cluster-level "last seen" tag (v0.9.7) — helps operators triage
+        // "is this cluster still active?" without reading the lastSeenAt
+        // column on the far side of the row. Per-sample timestamps would
+        // require a backend shape change (currently sample IDs are bare
+        // strings without per-id capturedAt); that's a follow-up.
+        <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>
+          · {fmtRelative(lastSeenMs, now)}
+        </span>
+      ) : null}
     </span>
   );
 }
 
-function SlowCallsPanel({
-  rows,
-  loading,
-}: {
-  rows: SlowCallRow[];
-  loading: boolean;
-}) {
+function SlowCallsPanel({ rows, loading }: { rows: SlowCallRow[]; loading: boolean }) {
   const { t } = useI18n();
   const now = Date.now();
   return (
@@ -106,9 +105,7 @@ function SlowCallsPanel({
                 <td>{fmtRelative(r.capturedAt, now)}</td>
                 <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
                   {r.runId ? (
-                    <Link to={`/runs/${encodeURIComponent(r.runId)}`}>
-                      {r.runId.slice(0, 18)}…
-                    </Link>
+                    <Link to={`/runs/${encodeURIComponent(r.runId)}`}>{r.runId.slice(0, 18)}…</Link>
                   ) : (
                     "—"
                   )}
@@ -151,26 +148,46 @@ function HeavyConversationsPanel({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, idx) => {
-              const total = r.totalTokensIn + r.totalTokensOut;
-              return (
-                <tr key={r.runId}>
-                  <td className="num">{idx + 1}</td>
-                  <td className="num">{total.toLocaleString()}</td>
-                  <td className="num">{r.totalTokensIn.toLocaleString()}</td>
-                  <td className="num">{r.totalTokensOut.toLocaleString()}</td>
-                  <td className="num">{r.llmHops}</td>
-                  <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
-                    {(r.sessionKey ?? "—").slice(0, 40)}
-                  </td>
-                  <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
-                    <Link to={`/conversations/${encodeURIComponent(r.runId)}`}>
-                      {r.runId.slice(0, 18)}…
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
+            {(() => {
+              // Pre-compute the page-max so we can render each row's
+              // tokensTotal as a relative magnitude bar. Long-tail
+              // distribution becomes visible immediately — much faster
+              // than comparing column digits.
+              const totals = rows.map((r) => r.totalTokensIn + r.totalTokensOut);
+              const maxTotal = totals.length === 0 ? 0 : Math.max(...totals);
+              return rows.map((r, idx) => {
+                const total = r.totalTokensIn + r.totalTokensOut;
+                const pct = maxTotal === 0 ? 0 : (total / maxTotal) * 100;
+                return (
+                  <tr key={r.runId}>
+                    <td className="num">{idx + 1}</td>
+                    <td className="num">
+                      {total.toLocaleString()}
+                      {total > 0 ? (
+                        <span
+                          className="mag-bar"
+                          aria-hidden="true"
+                          title={`${pct.toFixed(0)}% of page max`}
+                        >
+                          <span style={{ width: `${pct}%` }} />
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="num">{r.totalTokensIn.toLocaleString()}</td>
+                    <td className="num">{r.totalTokensOut.toLocaleString()}</td>
+                    <td className="num">{r.llmHops}</td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
+                      {(r.sessionKey ?? "—").slice(0, 40)}
+                    </td>
+                    <td style={{ fontFamily: "var(--mono)", fontSize: 11 }}>
+                      <Link to={`/conversations/${encodeURIComponent(r.runId)}`}>
+                        {r.runId.slice(0, 18)}…
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              });
+            })()}
           </tbody>
         </table>
       )}
@@ -178,13 +195,7 @@ function HeavyConversationsPanel({
   );
 }
 
-function ErrorClustersPanel({
-  rows,
-  loading,
-}: {
-  rows: ErrorClusterRow[];
-  loading: boolean;
-}) {
+function ErrorClustersPanel({ rows, loading }: { rows: ErrorClusterRow[]; loading: boolean }) {
   const { t } = useI18n();
   const now = Date.now();
   return (
@@ -213,7 +224,7 @@ function ErrorClustersPanel({
                 <td>{r.errorCategory ?? "—"}</td>
                 <td>{fmtRelative(r.lastSeenAt, now)}</td>
                 <td>
-                  <SampleRuns runIds={r.sampleRunIds} />
+                  <SampleRuns runIds={r.sampleRunIds} lastSeenMs={r.lastSeenAt} />
                 </td>
               </tr>
             ))}
@@ -224,13 +235,7 @@ function ErrorClustersPanel({
   );
 }
 
-function ToolFailuresPanel({
-  rows,
-  loading,
-}: {
-  rows: ToolFailureRow[];
-  loading: boolean;
-}) {
+function ToolFailuresPanel({ rows, loading }: { rows: ToolFailureRow[]; loading: boolean }) {
   const { t } = useI18n();
   const now = Date.now();
   return (
@@ -261,7 +266,7 @@ function ToolFailuresPanel({
                 <td className="num err">{(r.errorRate * 100).toFixed(1)}%</td>
                 <td>{r.lastFailureAt ? fmtRelative(r.lastFailureAt, now) : "—"}</td>
                 <td>
-                  <SampleRuns runIds={r.sampleRunIds} />
+                  <SampleRuns runIds={r.sampleRunIds} lastSeenMs={r.lastFailureAt} />
                 </td>
               </tr>
             ))}
@@ -274,13 +279,15 @@ function ToolFailuresPanel({
 
 export function Insights() {
   const { t } = useI18n();
-  const [windowSec, setWindowSec] = useState<number>(15 * 60);
+  // Insights honors the global window selector exclusively now (v0.9.7.1).
+  // The local per-page select used to live here as a fallback before the
+  // global selector existed; consolidating means operators don't have to
+  // remember which page has its own time control.
+  const { window: timeWindow } = useTimeWindow();
+  const windowSec = WINDOW_TO_SECONDS[timeWindow];
   const limit = 10;
 
-  const slowFetcher = useMemo(
-    () => () => api.insightsSlowCalls(windowSec, limit),
-    [windowSec],
-  );
+  const slowFetcher = useMemo(() => () => api.insightsSlowCalls(windowSec, limit), [windowSec]);
   const heavyFetcher = useMemo(
     () => () => api.insightsHeavyConversations(windowSec, limit),
     [windowSec],
@@ -289,10 +296,7 @@ export function Insights() {
     () => () => api.insightsErrorClusters(windowSec, limit),
     [windowSec],
   );
-  const toolsFetcher = useMemo(
-    () => () => api.insightsToolFailures(windowSec, limit),
-    [windowSec],
-  );
+  const toolsFetcher = useMemo(() => () => api.insightsToolFailures(windowSec, limit), [windowSec]);
 
   const slow = usePolling(slowFetcher, 10_000);
   const heavy = usePolling(heavyFetcher, 10_000);
@@ -302,27 +306,10 @@ export function Insights() {
   return (
     <div>
       <h2 className="page-title">{t("insights.title")}</h2>
-      <div className="subtitle">{t("insights.subtitle")}</div>
-
-      <div className="toolbar">
-        <label>{t("insights.window.label")}</label>
-        <select
-          value={windowSec}
-          onChange={(e) => setWindowSec(Number.parseInt(e.target.value, 10))}
-        >
-          {WINDOW_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {t(opt.key as never)}
-            </option>
-          ))}
-        </select>
-      </div>
+      <div className="subtitle">{t("insights.subtitleGlobal")}</div>
 
       <SlowCallsPanel rows={slow.data?.rows ?? []} loading={!slow.data} />
-      <HeavyConversationsPanel
-        rows={heavy.data?.rows ?? []}
-        loading={!heavy.data}
-      />
+      <HeavyConversationsPanel rows={heavy.data?.rows ?? []} loading={!heavy.data} />
       <ErrorClustersPanel rows={errors.data?.rows ?? []} loading={!errors.data} />
       <ToolFailuresPanel rows={tools.data?.rows ?? []} loading={!tools.data} />
     </div>

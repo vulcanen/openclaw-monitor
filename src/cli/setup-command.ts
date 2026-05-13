@@ -10,14 +10,15 @@ export type SetupOptions = {
 export function registerSetupCli(api: OpenClawPluginApi): void {
   api.registerCli(
     ({ program, logger }) => {
-      const root = program
-        .command("monitor")
-        .description("OpenClaw Monitor plugin commands");
+      const root = program.command("monitor").description("OpenClaw Monitor plugin commands");
 
       root
         .command("setup")
         .description("Trust openclaw-monitor and (optionally) enable conversation audit")
-        .option("--audit", "Also enable M5 content audit (writes allowConversationAccess + audit.enabled)")
+        .option(
+          "--audit",
+          "Also enable M5 content audit (writes allowConversationAccess + audit.enabled)",
+        )
         .action(async (opts: SetupOptions) => {
           await runSetup({ api, logger, audit: Boolean(opts.audit) });
         });
@@ -56,8 +57,7 @@ async function runSetup(params: SetupParams): Promise<void> {
   const beforeEntry = readMonitorEntry(before);
 
   const willAddAllow = !beforeAllow.includes(PLUGIN_ID);
-  const willSetConv =
-    audit && beforeEntry.hooks?.allowConversationAccess !== true;
+  const willSetConv = audit && beforeEntry.hooks?.allowConversationAccess !== true;
   const willEnableAudit = audit && beforeEntry.config?.audit?.enabled !== true;
 
   if (!willAddAllow && !willSetConv && !willEnableAudit) {
@@ -119,9 +119,9 @@ function readMonitorEntry(
 ): MonitorEntry {
   const entries = (config.plugins as { entries?: Record<string, unknown> } | undefined)?.entries;
   if (!entries || typeof entries !== "object") return {};
-  const entry = (entries as Record<string, unknown>)[PLUGIN_ID];
+  const entry = entries[PLUGIN_ID];
   if (!entry || typeof entry !== "object") return {};
-  return entry as MonitorEntry;
+  return entry;
 }
 
 function showStatus(params: { api: OpenClawPluginApi; logger: PluginLogger }): void {

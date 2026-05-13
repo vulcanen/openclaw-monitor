@@ -52,7 +52,9 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
 }
@@ -98,6 +100,24 @@ a:hover {
 .topbar nav {
   display: flex;
   gap: 4px;
+  align-items: center;
+}
+
+/* Nav grouping (v0.9.7). The .nav-group wraps a contiguous run of NavLinks;
+   the .nav-divider is a thin vertical rule that visually separates clusters
+   (Status / Roll-ups / Drill / Audit). Kept subtle — same border colour as
+   panels — so it reads as grouping rather than as a sub-section header. */
+.topbar nav .nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topbar nav .nav-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 8px;
 }
 
 .topbar nav a {
@@ -119,6 +139,30 @@ a:hover {
 
 .topbar .spacer {
   flex: 1;
+}
+
+/* Global time-window selector (v0.9.7). Compact select that matches the
+   topbar's height; pages opt in via useTimeWindow() — the value is mirrored
+   to URL hash (?window=15m) for shareable deep links. */
+.topbar .window-picker {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 12px;
+}
+
+.topbar .window-picker select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.topbar .window-picker select:hover {
+  border-color: var(--accent);
 }
 
 .topbar .status {
@@ -357,7 +401,8 @@ table {
   font-size: 13px;
 }
 
-table th, table td {
+table th,
+table td {
   text-align: left;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -400,10 +445,22 @@ table .err {
   text-transform: uppercase;
 }
 
-.tag.ok { background: rgba(63, 185, 80, 0.15); color: var(--good); }
-.tag.error { background: rgba(255, 123, 114, 0.15); color: var(--error); }
-.tag.warn { background: rgba(249, 179, 66, 0.15); color: var(--warn); }
-.tag.active { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.tag.ok {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--good);
+}
+.tag.error {
+  background: rgba(255, 123, 114, 0.15);
+  color: var(--error);
+}
+.tag.warn {
+  background: rgba(249, 179, 66, 0.15);
+  color: var(--warn);
+}
+.tag.active {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
 
 .errors-list {
   display: flex;
@@ -442,7 +499,8 @@ table .err {
   flex-wrap: wrap;
 }
 
-.toolbar input, .toolbar select {
+.toolbar input,
+.toolbar select {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -517,14 +575,28 @@ table .err {
   font-size: 11px;
 }
 
-.log-row .level.error { color: var(--error); }
-.log-row .level.warn { color: var(--warn); }
-.log-row .level.info { color: var(--accent); }
-.log-row .level.debug { color: var(--text-dim); }
+.log-row .level.error {
+  color: var(--error);
+}
+.log-row .level.warn {
+  color: var(--warn);
+}
+.log-row .level.info {
+  color: var(--accent);
+}
+.log-row .level.debug {
+  color: var(--text-dim);
+}
 
-.log-row .ts { color: var(--text-dim); }
-.log-row .component { color: var(--accent-2); }
-.log-row .msg { word-break: break-word; }
+.log-row .ts {
+  color: var(--text-dim);
+}
+.log-row .component {
+  color: var(--accent-2);
+}
+.log-row .msg {
+  word-break: break-word;
+}
 
 code {
   font-family: var(--mono);
@@ -542,4 +614,130 @@ pre {
   border-radius: 6px;
   overflow-x: auto;
   border: 1px solid var(--border);
+}
+
+/* Pagination buttons (v0.9.7). Extracted from inline style object so future
+   button restyles touch one declaration only. */
+.pager-button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+}
+.pager-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pager-button:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+/* Overview health banner (v0.9.7). Full-width strip at the top of the
+   Overview page. Severity selected from the rolling-window snapshot:
+   .health-ok = normal, .health-warn = attention, .health-error = incident.
+   Reuses --good / --warn / --error tokens; no new hex values. */
+.health-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  border-left: 4px solid var(--good);
+  background: color-mix(in srgb, var(--good) 8%, var(--panel));
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+.health-banner.health-warn {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+}
+.health-banner.health-error {
+  border-left-color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, var(--panel));
+}
+.health-banner .health-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.health-banner .health-headline {
+  font-weight: 500;
+  color: var(--text);
+}
+.health-banner .health-detail {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-left: auto;
+  font-family: var(--mono);
+}
+
+/* Alerts firing badge in the topbar (v0.9.7). Small pill that links to
+   /alerts so on-call doesn't need to switch tabs to notice a firing
+   alert. */
+.topbar .alerts-firing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: color-mix(in srgb, var(--error) 12%, var(--panel-2));
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-decoration: none;
+  margin-right: 12px;
+}
+.topbar .alerts-firing:hover {
+  background: color-mix(in srgb, var(--error) 20%, var(--panel-2));
+  text-decoration: none;
+}
+
+/* Inline error-rate bar used inside DimensionTable rows (v0.9.7). Renders
+   alongside the percentage so the magnitude is readable at a glance. */
+.err-rate-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.err-rate-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.err-rate-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--error);
+  border-radius: 2px;
+}
+
+/* Inline magnitude bar used inside Insights heavy-conversations rows
+   (v0.9.7). Shows share-of-max token usage; same shape as err-rate-bar
+   but accent colour. */
+.mag-bar {
+  width: 80px;
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.mag-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
 }

@@ -123,7 +123,7 @@ export function createAggregator(): Aggregator {
     const bucketTs = Math.floor(ts / 1000 / SERIES_BUCKET_SEC) * SERIES_BUCKET_SEC;
     const ring = seriesRings[metric];
     const last = ring[ring.length - 1];
-    if (last && last.bucketTs === bucketTs) {
+    if (last?.bucketTs === bucketTs) {
       last.count += amount;
       return;
     }
@@ -303,7 +303,7 @@ export function createAggregator(): Aggregator {
       // needs the *token-bearing* facet — so just attach it. Same ts, same
       // type, no double counting.
       const last = recent[recent.length - 1];
-      if (last && last.type === event.type) {
+      if (last?.type === event.type) {
         last.tokens = {
           inputTokens: (last.tokens?.inputTokens ?? 0) + inputTokens,
           outputTokens: (last.tokens?.outputTokens ?? 0) + outputTokens,
@@ -354,10 +354,7 @@ export function createAggregator(): Aggregator {
       WINDOW_KEYS.map((key) => [key, now - WINDOW_SIZES_MS[key]] as const),
     ) as Record<WindowKey, number>;
 
-  const computeWindow = (
-    cutoffMs: number,
-    now: number,
-  ): WindowSnapshot => {
+  const computeWindow = (cutoffMs: number, now: number): WindowSnapshot => {
     const snap: WindowSnapshot = {
       modelCalls: 0,
       modelErrors: 0,
@@ -375,19 +372,25 @@ export function createAggregator(): Aggregator {
     };
     void now;
     const modelDurations: number[] = [];
+    // Note: we used to early-break on the first point with ts < cutoffMs
+    // assuming `recent` is monotonically increasing. That assumption broke
+    // at startup: the replay path (`service.start`) is async and fanout is
+    // started before replay completes, so live events with newer ts can
+    // land in `recent` ahead of replayed historical events with older ts.
+    // Hitting break too early made Overview cards briefly read zero during
+    // those first seconds. Full scan is O(MAX_RECENT_EVENTS) per window
+    // (≤ 10k) and the windows() snapshot is cached at the REST layer, so
+    // the cost is bounded.
     for (let index = recent.length - 1; index >= 0; index -= 1) {
       const point = recent[index];
-      if (!point || point.ts < cutoffMs) break;
+      if (!point || point.ts < cutoffMs) continue;
       // Only count terminal events to avoid double-counting (started + completed).
       if (point.type.startsWith("model.call.") && point.type !== "model.call.started") {
         snap.modelCalls += 1;
         if (point.outcome === "error") snap.modelErrors += 1;
         if (typeof point.durationMs === "number") modelDurations.push(point.durationMs);
       }
-      if (
-        point.type.startsWith("tool.execution.") &&
-        point.type !== "tool.execution.started"
-      ) {
+      if (point.type.startsWith("tool.execution.") && point.type !== "tool.execution.started") {
         snap.toolExecs += 1;
         if (point.outcome === "error") snap.toolErrors += 1;
         if (point.type === "tool.execution.blocked") snap.toolBlocked += 1;

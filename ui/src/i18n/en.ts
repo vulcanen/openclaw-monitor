@@ -8,6 +8,7 @@ export const en: Strings = {
   "nav.models": "Models",
   "nav.tools": "Tools",
   "nav.runs": "Runs",
+  "nav.sessions": "Sessions",
   "nav.conversations": "Conversations",
   "nav.logs": "Logs",
   "nav.alerts": "Alerts",
@@ -16,7 +17,10 @@ export const en: Strings = {
 
   // Insights (v0.9.0+)
   "insights.title": "Insights / Top-N",
-  "insights.subtitle": "Turns rolled-up metrics into clickable individuals — slowest / heaviest / most error-prone / flakiest. Each row links into the Run Detail page.",
+  "insights.subtitle":
+    "Turns rolled-up metrics into clickable individuals — slowest / heaviest / most error-prone / flakiest. Each row links into the Run Detail page.",
+  "insights.subtitleGlobal":
+    "Turns rolled-up metrics into clickable individuals. Time window follows the global selector in the topbar.",
   "insights.window.label": "window",
   "insights.window.15m": "last 15 min",
   "insights.window.1h": "last 1 hour",
@@ -68,7 +72,9 @@ export const en: Strings = {
 
   // Costs (v0.8.0+)
   "costs.title": "Costs / Token Economics",
-  "costs.subtitle": "currency: {currency} · sourced from the llm_output hook, gated by audit · refreshed {time}",
+  "costs.subtitle":
+    "currency: {currency} · sourced from the llm_output hook, gated by audit · refreshed {time}",
+  "costs.range.window": "cost · last {window}",
   "costs.range.today": "today (UTC)",
   "costs.range.thisWeek": "this week (UTC, since Monday)",
   "costs.range.thisMonth": "this month (UTC, since the 1st)",
@@ -90,10 +96,15 @@ export const en: Strings = {
   "costs.notice.noPricing": "tokens recorded but the price table is empty — every cost is 0",
   "costs.notice.noPricingHint":
     "Add your provider/model entries to plugins.entries.openclaw-monitor.config.pricing.models (per 1k tokens) in ~/.openclaw/openclaw.json, then restart the gateway.",
-  "costs.notice.noTokens": "Token data is 0 — set compat.supportsUsageInStreaming: true on the model first",
+  "costs.notice.noTokens": "Token data is 0 — work through the likely causes in order",
+  "costs.notice.noTokensHint.gate":
+    "Host gate is off — `llm_output` is gated by plugins.entries.openclaw-monitor.hooks.allowConversationAccess. With it off, the host silently refuses to fire the hook and token / cost stay at 0. Fix: run `openclaw monitor setup --audit` on the host and restart the gateway.",
+  "costs.notice.noTokensHint.compat":
+    'Host drops upstream streaming usage — for any OpenAI-compat provider with an unrecognised baseUrl, host defaults compat.supportsUsageInStreaming=false (host: src/plugins/provider-model-compat.ts) and discards the usage frame even when the upstream sends it. Fix: add "compat": { "supportsUsageInStreaming": true } to the model entry under models.providers.<id>.models[*] in ~/.openclaw/openclaw.json and restart the gateway.',
+  "costs.notice.noTokensHint.adapter":
+    "Provider adapter doesn't fire llm_output — rare for built-in adapters, more common with custom / non-standard ones that skip the hook entirely. Deeper fix: check host logs to confirm the model.call exercises the llm_output path, or curl the upstream directly with stream_options.include_usage:true to verify it returns usage at all.",
   "costs.notice.noTokensHint":
-    "OpenClaw host defaults `supportsUsageInStreaming` to false for any OpenAI-compat provider with an unrecognised baseUrl (host: src/plugins/provider-model-compat.ts), which silently drops the usage frame the upstream actually sends. Fix: add \"compat\": { \"supportsUsageInStreaming\": true } to the model entry under models.providers.<id>.models[*] in ~/.openclaw/openclaw.json and restart the gateway. See the README \"Known config notes for self-hosted LLM providers\" section. If it's still 0 after that, verify the upstream itself returns usage (curl it directly with stream_options.include_usage:true).",
-
+    "OpenClaw host defaults supportsUsageInStreaming to false for any OpenAI-compat provider with an unrecognised baseUrl and drops the usage frame upstream sends. See the README for details.",
 
   // Alerts (v0.7.0+)
   "alerts.title": "Alerts",
@@ -114,6 +125,7 @@ export const en: Strings = {
   "alerts.col.name": "name",
   "alerts.col.severity": "severity",
   "alerts.col.rule": "rule",
+  "alerts.col.ruleExpr": "rule expression",
   "alerts.col.channels": "channels",
   "alerts.col.status": "status",
   "alerts.col.value": "value",
@@ -125,24 +137,74 @@ export const en: Strings = {
   "alerts.status.firing": "firing",
   "alerts.status.ok": "ok",
 
+  // Sessions (v0.9.7)
+  "sessions.title": "Session lifecycle",
+  "sessions.subtitle":
+    "derived from session.lifecycle.* synthetic events · {active} active right now · {total} record(s) total",
+  "sessions.filter.status": "status filter",
+  "sessions.status.active": "active",
+  "sessions.status.processing": "processing",
+  "sessions.status.idle": "idle",
+  "sessions.status.ended": "ended",
+  "sessions.col.sessionKey": "session key",
+  "sessions.col.status": "status",
+  "sessions.col.started": "started",
+  "sessions.col.ended": "ended",
+  "sessions.col.duration": "duration",
+  "sessions.col.reason": "reason",
+  "sessions.col.messages": "messages",
+  "sessions.empty": "no session activity yet",
+  "sessions.emptyHint":
+    "Session data is derived from `session.state` events (one fires on every idle↔processing toggle). If this is empty, confirm the gateway has processed any messages today. `session.lifecycle.*` is a v0.9.6 subscription that only fires when the agent harness explicitly creates / destroys a session — most chat flows don't trigger it, it just augments status when present.",
+
   // Sources
   "sources.title": "Sources",
-  "sources.subtitle":
-    "Traffic broken down by entry path (OpenAI API, Control UI, channel plugins)",
+  "sources.subtitle": "Traffic broken down by entry path (OpenAI API, Control UI, channel plugins)",
   "sources.rollup": "per-source rollup",
   "sources.col.source": "source",
   "sources.legend": "source id key",
   "sources.legend.id": "id",
   "sources.legend.meaning": "meaning",
-  "sources.legend.openaiApi": "OpenAI-compatible API (/v1/chat/completions); callers are usually external apps",
+  "sources.legend.openaiApi":
+    "OpenAI-compatible API (/v1/chat/completions); callers are usually external apps",
   "sources.legend.controlUi": "OpenClaw built-in Control UI chat",
-  "sources.legend.channelPlugin": "channel plugin entry (telegram / discord / feishu / ...); <name> is the channel id",
+  "sources.legend.channelPlugin":
+    "channel plugin entry (telegram / discord / feishu / ...); <name> is the channel id",
 
   // Top bar status / actions
   "status.idle": "idle",
   "status.live": "live · {count} events seen",
   "action.signOut": "sign out",
   "action.langSwitch": "中",
+
+  // Global time-window selector (v0.9.7)
+  "topbar.window": "window",
+  "topbar.window.1m": "last 1 min",
+  "topbar.window.5m": "last 5 min",
+  "topbar.window.15m": "last 15 min",
+  "topbar.window.1h": "last 1 hour",
+  "topbar.window.6h": "last 6 hours",
+  "topbar.window.24h": "last 24 hours",
+  "topbar.alertsFiring": "{count} firing",
+
+  // Overview health banner (v0.9.7)
+  "overview.health.label": "status",
+  "overview.health.ok": "all systems normal",
+  "overview.health.warn": "{count} item(s) need attention",
+  "overview.health.error": "incident: {count} fresh error(s)",
+  "overview.health.detailCalm": "no errors in last 1m · no session alerts in last 15m",
+  "overview.health.detailIssues":
+    "5m error rate {errorRate}% · {sessionsAlerted} stuck session(s) · {recentErrors} recent error(s)",
+  "overview.section.topSources": "Top entry sources today",
+  "overview.section.topSourcesSub": "top 5 entry paths by call volume",
+  "overview.lifecycle.activeSessions": "active sessions",
+  "overview.lifecycle.compactionsToday": "compactions today",
+  "overview.lifecycle.lastRestart": "last gateway start",
+  "overview.lifecycle.toolPersists": "persisted tool results (1h)",
+  "overview.lifecycle.never": "not captured yet",
+  "overview.lifecycle.relativeMin": "{n}m ago",
+  "overview.lifecycle.relativeHour": "{n}h ago",
+  "overview.lifecycle.relativeDay": "{n}d ago",
 
   // Token gate
   "tokenGate.title": "OpenClaw Monitor",
@@ -168,17 +230,39 @@ export const en: Strings = {
   "empty.errors": "no errors recorded",
   "empty.dataYet": "no data captured yet",
   "empty.logs": "no log records buffered",
+  "empty.logs.hint.filter":
+    "Filters may be too narrow — clear level / component / event-type prefix.",
+  "empty.logs.hint.warmup":
+    "It takes a few seconds for the event ring to fill after gateway start; refresh and re-check.",
+  "empty.logs.hint.noTraffic":
+    "If filters are open and the ring is still empty, confirm the gateway is actually handling traffic (curl /v1/chat/completions or open a channel session).",
   "empty.runs": "no runs match",
+  "empty.runs.hint.filter": 'Status filter may be too narrow — pick "All" to see every run.',
+  "empty.runs.hint.retention":
+    "Runs are pruned after retention.runsDays (default 30) — raise it if you need older runs.",
+  "empty.runs.hint.noTraffic":
+    "Confirm the agent harness actually ran (Control-UI-only chats don't create run records).",
 
   // Stat & chart labels
   "stat.modelCalls1m": "model calls (1m)",
   "stat.errorRate5m": "error rate (5m)",
   "stat.modelP955m": "model p95 (5m)",
   "stat.sessionAlerts15m": "session alerts (15m)",
+  "stat.modelCallsWindow": "model calls ({window})",
+  "stat.errorRateWindow": "error rate ({window})",
+  "stat.modelP95Window": "model p95 ({window})",
+  "stat.sessionAlertsWindow": "session alerts ({window})",
   "stat.errors": "{count} errors",
   "stat.errorRateDetail": "{errors}/{total}",
   "stat.latency": "latency",
   "chart.eventsLast15m": "events / 10s · last 15m",
+  "chart.events": "{metric} / 10s · {window}",
+  "chart.eventsCapped": "{metric} / 10s · capped to 1h ({window} exceeds series ring)",
+  "chart.metric.events": "events",
+  "chart.metric.modelCalls": "model calls",
+  "chart.metric.modelErrors": "model errors",
+  "chart.metric.toolExecs": "tool execs",
+  "chart.metric.toolErrors": "tool errors + blocks",
   "chart.modelCallsLast15m": "model calls / 10s · last 15m",
   "chart.modelErrorsLast15m": "model errors / 10s · last 15m",
   "chart.toolExecsLast15m": "tool execs / 10s · last 15m",
@@ -197,11 +281,12 @@ export const en: Strings = {
 
   // Channels
   "channels.title": "Channels",
-  "channels.subtitle": "Aggregated by the host's `channel` field. OpenClaw stamps every internal entry as `webchat`, so the Sources page is where OpenAI API / Control UI / etc are broken apart.",
+  "channels.subtitle":
+    "Aggregated by the host's `channel` field. OpenClaw stamps every internal entry as `webchat`, so the Sources page is where OpenAI API / Control UI / etc are broken apart.",
   "channels.rollup": "per-channel rollup",
   "channels.chartTitle": "model calls · last 15m",
   "channels.hostHint":
-    "OpenClaw's INTERNAL_MESSAGE_CHANNEL constant is `\"webchat\"` — it covers /v1/chat/completions, the Control UI built-in chat, heartbeat / cron triggers, every non-channel-plugin entry. Go to Sources to split by actual entry path.",
+    'OpenClaw\'s INTERNAL_MESSAGE_CHANNEL constant is `"webchat"` — it covers /v1/chat/completions, the Control UI built-in chat, heartbeat / cron triggers, every non-channel-plugin entry. Go to Sources to split by actual entry path.',
 
   // Models
   "models.title": "Models",
@@ -215,8 +300,7 @@ export const en: Strings = {
 
   // Runs list
   "runs.title": "Runs",
-  "runs.subtitle":
-    "harness runs · {active} active · drill into a run for full event timeline",
+  "runs.subtitle": "harness runs · {active} active · drill into a run for full event timeline",
   "runs.filter.status": "status",
   "runs.status.all": "all",
   "runs.status.active": "active",
@@ -261,11 +345,11 @@ export const en: Strings = {
 
   // Logs
   "logs.title": "Logs",
-  "logs.subtitle":
-    "redacted log records emitted via the diagnostic event bus · refreshes every 4s",
+  "logs.subtitle": "redacted log records emitted via the diagnostic event bus · refreshes every 4s",
   "logs.filter.level": "level",
   "logs.filter.component": "component",
   "logs.filter.componentPlaceholder": "e.g. gateway",
+  "logs.filter.typePrefix": "event type",
   "logs.col.time": "time",
   "logs.col.level": "level",
   "logs.col.component": "component",
@@ -273,8 +357,10 @@ export const en: Strings = {
 
   // Conversations list (M5)
   "conversations.title": "Conversations",
-  "conversations.subtitle":
-    "full content audit · {active} in flight · click a runId for details",
+  "conversations.subtitle": "full content audit · {active} in flight · click a runId for details",
+  "conversations.filter.status": "status filter",
+  "conversations.filter.errorsOnly": "errors only",
+  "conversations.filter.okOnly": "successful only",
   "conversations.empty": "no conversations captured yet",
   "conversations.emptyHint":
     "OpenAI API and channel-plugin conversations carry full LLM content; Control UI and other internal paths can only be tracked at session-level (no body).",
@@ -294,6 +380,7 @@ export const en: Strings = {
 
   // Conversation detail (M5)
   "conversationDetail.title": "conversation {runId}",
+  "conversationDetail.titleShort": "Conversation Detail",
   "conversationDetail.backToList": "← back to conversations",
   "conversationDetail.summary": "summary",
   "conversationDetail.row.status": "status",

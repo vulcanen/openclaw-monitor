@@ -6,6 +6,7 @@ import type { StoreRef } from "../storage/store-ref.js";
 import type { EventBuffer } from "../storage/ring-buffer.js";
 import type {
   CapturedEvent,
+  DimensionRow,
   EventType,
   LogRecord,
   OverviewSnapshot,
@@ -50,9 +51,7 @@ function summarizeErrorEvent(captured: CapturedEvent): string {
 function parseQuery(url: string | undefined): URLSearchParams {
   if (!url) return new URLSearchParams();
   const queryStart = url.indexOf("?");
-  return queryStart === -1
-    ? new URLSearchParams()
-    : new URLSearchParams(url.slice(queryStart + 1));
+  return queryStart === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(queryStart + 1));
 }
 
 export function createOverviewHandler(params: {
@@ -62,23 +61,30 @@ export function createOverviewHandler(params: {
   return async (_req: IncomingMessage, res: ServerResponse) => {
     const { buffer, aggregator } = params;
     const counts = buffer.countsByType();
+    // Pull a single time-ordered slice across all event types and filter
+    // by ERROR_EVENT_TYPES. The previous approach took N of *each* error
+    // type and then sorted, which over-sampled rare types and under-
+    // sampled the chatty ones: a single bursty `model.call.error` flood
+    // would crowd out a single `session.stuck` from the same minute.
+    // Pulling ~MAX_RECENT_ERRORS×8 from the time-ordered ring is plenty
+    // for the 20-row "what's failing right now" panel.
+    const candidates = buffer.recent({ limit: MAX_RECENT_ERRORS * 8 });
     const recentErrors: OverviewSnapshot["recentErrors"] = [];
-    for (const type of ERROR_EVENT_TYPES) {
-      const items = buffer.recent({ type, limit: MAX_RECENT_ERRORS });
-      for (const item of items) {
-        recentErrors.push({
-          type: item.event.type,
-          capturedAt: new Date(item.capturedAt).toISOString(),
-          summary: summarizeErrorEvent(item),
-        });
-      }
+    for (let i = candidates.length - 1; i >= 0 && recentErrors.length < MAX_RECENT_ERRORS; i -= 1) {
+      const item = candidates[i];
+      if (!item) continue;
+      if (!ERROR_EVENT_TYPES.has(item.event.type)) continue;
+      recentErrors.push({
+        type: item.event.type,
+        capturedAt: new Date(item.capturedAt).toISOString(),
+        summary: summarizeErrorEvent(item),
+      });
     }
-    recentErrors.sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
     const snapshot: OverviewSnapshot = {
       generatedAt: new Date().toISOString(),
       bufferedEvents: buffer.size(),
       countsByType: counts,
-      recentErrors: recentErrors.slice(0, MAX_RECENT_ERRORS),
+      recentErrors,
       windows: aggregator.windows(),
     };
     writeJson(res, 200, snapshot);
@@ -120,15 +126,13 @@ export function createHealthHandler(): OpenClawPluginHttpRouteHandler {
 }
 
 export function createDimensionHandler(
-  rows: () => Array<{
-    key: string;
-    total: number;
-    errors: number;
-    p50Ms: number | null;
-    p95Ms: number | null;
-    tokensIn?: number;
-    tokensOut?: number;
-  }>,
+  // Use the canonical DimensionRow type so cost / cacheRead / cacheWrite
+  // columns are surfaced to API consumers (Channels / Models / Tools /
+  // Sources pages). Previously a narrower inline type was declared here
+  // that dropped those columns from the typed contract — though
+  // JSON.stringify forwarded them anyway, the inconsistency masked when
+  // the UI should expect cost data per dimension.
+  rows: () => DimensionRow[],
 ): OpenClawPluginHttpRouteHandler {
   return async (_req: IncomingMessage, res: ServerResponse) => {
     writeJson(res, 200, {
@@ -154,8 +158,7 @@ export function createRunsHandler(params: {
     const active = params.tracker.active();
     const memory = params.tracker.recent();
     const store = params.storeRef.get();
-    const persisted: RunSnapshot[] =
-      includePersisted && store ? store.readRuns({ limit }) : [];
+    const persisted: RunSnapshot[] = includePersisted && store ? store.readRuns({ limit }) : [];
     const seen = new Set<string>();
     const merged: RunSnapshot[] = [];
     for (const run of [...active, ...memory, ...persisted]) {
@@ -182,9 +185,16 @@ export function createRunDetailHandler(params: {
     const url = req.url ?? "";
     const queryStart = url.indexOf("?");
     const pathname = queryStart === -1 ? url : url.slice(0, queryStart);
-    const id = pathname.split("/").filter(Boolean).pop();
-    if (!id) {
+    const raw = pathname.split("/").filter(Boolean).pop();
+    if (!raw) {
       writeJson(res, 400, { error: "missing run id" });
+      return true;
+    }
+    let id: string;
+    try {
+      id = decodeURIComponent(raw);
+    } catch {
+      writeJson(res, 400, { error: "invalid run id encoding" });
       return true;
     }
     const store = params.storeRef.get();
@@ -224,7 +234,13 @@ function inferLogLevel(event: { type: string }, raw: Record<string, unknown>): s
   if (type.endsWith(".error") || type === "session.stuck" || type === "session.stalled") {
     return "error";
   }
-  if (type === "tool.execution.blocked" || type === "diagnostic.liveness.warning") {
+  if (
+    type === "tool.execution.blocked" ||
+    type === "diagnostic.liveness.warning" ||
+    // Gateway going down is operationally significant — surface as warn
+    // so it stands out in the timeline even when not technically an error.
+    type === "gateway.lifecycle.stopped"
+  ) {
     return "warn";
   }
   if (type === "diagnostic.heartbeat" || type === "diagnostic.memory.sample") {
@@ -276,6 +292,11 @@ export function createLogsHandler(buffer: EventBuffer): OpenClawPluginHttpRouteH
     const levelFilter = query.get("level") ?? undefined;
     const componentFilter = query.get("component") ?? undefined;
     const typeFilter = query.get("type") ?? undefined;
+    // Event-type prefix filter (e.g. `typePrefix=model.` to see only model-
+    // related events). The UI exposes this as a select of common prefixes
+    // (model. / tool. / session. / message. / harness.); `type=` is for
+    // exact-match queries when the operator knows the full event name.
+    const typePrefixFilter = query.get("typePrefix") ?? undefined;
     // The host filters all `log.record` events out of onDiagnosticEvent
     // before any external plugin sees them (see CLAUDE.md / host
     // diagnostic-events.ts). The Logs page therefore renders the diagnostic
@@ -293,12 +314,11 @@ export function createLogsHandler(buffer: EventBuffer): OpenClawPluginHttpRouteH
       const raw = item.event as unknown as Record<string, unknown>;
       const level = inferLogLevel(item.event, raw);
       const component =
-        typeof raw["component"] === "string"
-          ? raw["component"]
-          : item.event.type.split(".")[0];
+        typeof raw["component"] === "string" ? raw["component"] : item.event.type.split(".")[0];
       const message = formatLogMessage(item.event, raw);
       if (levelFilter && level !== levelFilter) continue;
       if (componentFilter && !component?.includes(componentFilter)) continue;
+      if (typePrefixFilter && !item.event.type.startsWith(typePrefixFilter)) continue;
       records.push({
         capturedAt: new Date(item.capturedAt).toISOString(),
         ...(level ? { level } : {}),
@@ -336,9 +356,7 @@ export function createSeriesHandler(aggregator: Aggregator): OpenClawPluginHttpR
     }
     const windowSecRaw = Number.parseInt(query.get("windowSec") ?? "900", 10);
     const windowSec =
-      Number.isFinite(windowSecRaw) && windowSecRaw > 0
-        ? Math.min(windowSecRaw, 3_600)
-        : 900;
+      Number.isFinite(windowSecRaw) && windowSecRaw > 0 ? Math.min(windowSecRaw, 3_600) : 900;
     const result = aggregator.series({
       metric: metric as SeriesMetric,
       windowSec,

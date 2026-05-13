@@ -3,12 +3,7 @@ import type { OpenClawPluginHttpRouteHandler } from "openclaw/plugin-sdk/plugin-
 import type { Aggregator } from "../pipeline/aggregator.js";
 import type { DailyCostStoreRef } from "./store-ref.js";
 import { dailyCostHelpers } from "./daily-store.js";
-import type {
-  CostDimensionRow,
-  CostRangeSummary,
-  CostSnapshot,
-  PricingConfig,
-} from "./types.js";
+import type { CostDimensionRow, CostRangeSummary, CostSnapshot, PricingConfig } from "./types.js";
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;

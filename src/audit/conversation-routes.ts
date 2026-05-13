@@ -75,9 +75,7 @@ function groupBySession(summaries: ConversationSummary[]): SessionGroup[] {
       (b.endedAt ?? b.startedAt).localeCompare(a.endedAt ?? a.startedAt),
     );
   }
-  return Array.from(groups.values()).sort((a, b) =>
-    b.lastSeenAt.localeCompare(a.lastSeenAt),
-  );
+  return Array.from(groups.values()).sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
 }
 
 export function createConversationsListHandler(params: {
@@ -87,14 +85,25 @@ export function createConversationsListHandler(params: {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const query = parseQuery(req.url);
     const limitRaw = Number.parseInt(query.get("limit") ?? "50", 10);
-    const limit =
-      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 50;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 50;
     const groupBy = query.get("groupBy");
+    // Operator-facing filters. The most common request from on-call is
+    // "show me only the failed dialogues today" — surface that as a
+    // first-class server-side filter so the UI doesn't have to fetch
+    // hundreds of summaries and discard most of them client-side.
+    const hasErrorParam = query.get("hasError");
+    const hasErrorFilter =
+      hasErrorParam === "true" ? true : hasErrorParam === "false" ? false : undefined;
     const recent = params.probe.recentCompleted();
     // When grouping by session, pull a larger persisted slice so each session
     // can show its complete run history (`limit` then applies to the
     // post-group ordering, not the underlying conversations).
-    const fetchLimit = groupBy === "sessionKey" ? Math.min(limit * 10, 1000) : limit;
+    // When a hasError filter is set, fetch deeper too — most conversations
+    // succeed so filtering down to errors at the small list size will
+    // otherwise return almost nothing.
+    let fetchLimit = limit;
+    if (groupBy === "sessionKey") fetchLimit = Math.min(limit * 10, 1000);
+    if (hasErrorFilter !== undefined) fetchLimit = Math.min(Math.max(fetchLimit, limit * 20), 2000);
     const persisted = params.storeRef.get()?.list({ limit: fetchLimit }) ?? [];
     const seen = new Set<string>();
     const merged: ConversationSummary[] = [];
@@ -109,8 +118,10 @@ export function createConversationsListHandler(params: {
       merged.push(summary);
     }
     merged.sort((a, b) => (b.endedAt ?? b.startedAt).localeCompare(a.endedAt ?? a.startedAt));
+    const filtered =
+      hasErrorFilter === undefined ? merged : merged.filter((c) => c.hasError === hasErrorFilter);
     if (groupBy === "sessionKey") {
-      const sessions = groupBySession(merged);
+      const sessions = groupBySession(filtered);
       writeJson(res, 200, {
         generatedAt: new Date().toISOString(),
         active: params.probe.activeCount(),
@@ -122,7 +133,7 @@ export function createConversationsListHandler(params: {
     writeJson(res, 200, {
       generatedAt: new Date().toISOString(),
       active: params.probe.activeCount(),
-      conversations: merged.slice(0, limit),
+      conversations: filtered.slice(0, limit),
     });
     return true;
   };
@@ -136,9 +147,23 @@ export function createConversationDetailHandler(params: {
     const url = req.url ?? "";
     const queryStart = url.indexOf("?");
     const pathname = queryStart === -1 ? url : url.slice(0, queryStart);
-    const id = pathname.split("/").filter(Boolean).pop();
-    if (!id) {
+    const raw = pathname.split("/").filter(Boolean).pop();
+    if (!raw) {
       writeJson(res, 400, { error: "missing run id" });
+      return true;
+    }
+    // Browsers will %-encode any non-ASCII / reserved chars in the runId
+    // path segment. Current runId shapes (chatcmpl_*, ctrl_*, alphanum)
+    // don't trigger this, but a future synthetic runId scheme (or an
+    // external system passing in a custom id via the channel) could —
+    // and a silently-failed lookup is much harder to debug than a
+    // correct one. Decode here once and use the decoded form for all
+    // store + memory lookups.
+    let id: string;
+    try {
+      id = decodeURIComponent(raw);
+    } catch {
+      writeJson(res, 400, { error: "invalid run id encoding" });
       return true;
     }
     const fromMemory = params.probe.recentCompleted().find((r) => r.runId === id);

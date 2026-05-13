@@ -38,9 +38,7 @@ export function summarizeConversation(record: ConversationRecord): ConversationS
     llmHops: record.llmInputs.length,
     totalTokensIn: totalIn,
     totalTokensOut: totalOut,
-    ...(record.inbound?.prompt
-      ? { promptPreview: record.inbound.prompt.slice(0, 160) }
-      : {}),
+    ...(record.inbound?.prompt ? { promptPreview: record.inbound.prompt.slice(0, 160) } : {}),
     ...(responseText ? { responsePreview: responseText } : {}),
     hasError: record.status === "error" || Boolean(record.errorMessage),
   };

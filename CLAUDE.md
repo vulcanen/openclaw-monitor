@@ -221,6 +221,68 @@
     - **绝对不要自动改版本号**：升级 `package.json` / `openclaw.plugin.json` 的 baseline 是有意决策，需要用户 explicit 授权，仅做"评估 + 报告"。
     - **报告口径**：一句话告诉用户（"已是最新" / "有新 stable，影响评估：xxx"），**不要**把整篇 release notes 复述回对话——长度 + 信号比太差。详情让用户自己点 URL。
 
+43. **`installHookMetrics` 必须用 WeakSet 防同一 api 被注册两次**（v0.9.6 修复 — pre-existing 致命 bug）：决策 #12 让 `bundle.registerHooks(api)` 每次 register 都跑；不同 load profile 给的是不同 api object，正确链路是"每个 api 上注册一次"。但若同一个 api 因为 cache 刷新 / hot reload 被传两次，`api.on("llm_output", h)` 就会叠两个 listener，host 端 `getHooksForName`（host: `src/plugins/registry.ts`）不按 plugin 去重，**单条 llm_output 触发会合成 N 条 `llm.tokens.recorded`**——决策 #25 早就标记这个事件是 plugin-private 且 fanout 只用 callId/toolCallId 做 dedup，token 事件**两个 id 都没有**，aggregator + daily-cost JSONL 直接 N 倍累计。修复 `src/probes/hook-metrics.ts: installedApis = new WeakSet<OpenClawPluginApi>()`，首行 `if (installedApis.has(api)) return; installedApis.add(api);`。同步在 `src/probes/event-subscriber.ts: dispatch` 给 `llm.tokens.recorded` 加 `tok:${runId}:${seq}` dedupeId（`buildTokenEvent` 已生成单调 seq）作为 belt-and-suspenders。回归测试 `service.test.ts > "installHookMetrics is idempotent on the same api object"` 与 `"llm.tokens.recorded with same (runId, seq) is deduped at the fanout"`。**不要**改成把 dedup 范围扩到 `harness.run.*`——那些事件没 seq 且 agent_turn_prepare 每 turn fire 一次（多 turn 合法重入）。
+
+44. **`ring-buffer.append` 必须支持显式 capturedAt**（v0.9.6 修复 — pre-existing 致命 bug）：`service.start` 的 replay 路径（决策 #32）从 JSONL 把今日历史事件喂回 buffer + aggregator。aggregator 路径用 `captured.capturedAt` 正确；buffer 路径之前调 `buffer.append(captured.event)`，append 内部 `Date.now()` 覆盖时间戳——结果**重启后头几小时**所有 Logs / Overview `recentErrors` / Insights cutoff 都以为历史错误是"刚刚"。修复 `src/storage/ring-buffer.ts: append(event, capturedAtMs?)`，service.ts replay 与 fanout dispatch 都传 capturedAt。回归测试 `service.test.ts > "preserves an explicit capturedAt on replay-style appends"`。
+
+45. **`computeWindow` 不能假设 `recent[]` 单调升序**（v0.9.6 修复 — pre-existing bug）：原实现倒序循环，遇 `ts < cutoffMs` 立即 `break`。决策 #32 说明 replay 是 fire-and-forget（`void replay()`）且 fanout.start 紧随其后启动；live 事件在 replay 仍在跑时已开始 push 到 `recent`，**新 ts 排在旧 ts 后面**，break 过早导致窗口短时间归零。修复改为 `continue` 整段扫满。代价：1h 窗口从早断转为全扫 ≤ 10k 元素，仍 O(10k) 单次约 0.5 ms 可接受；windows() snapshot 后续可加 1s TTL 缓存进一步降负载（见审计报告 Hot #6，未做）。**不要**回退到 break——会再次在每次重启后让 Overview 卡片几秒钟显示 0。
+
+46. **`truncateString` 按 UTF-8 字符边界切，不要按 char index**（v0.9.6 修复 — pre-existing bug）：原实现 `Buffer.byteLength` 判超限但 `value.slice(0, max - ELLIPSIS.length)` 按 UTF-16 code unit 切。中文 / emoji 1 char = 3-4 字节，超限 1 MiB 的 prompt 实际切出来可能仍 3 MiB；更糟的是有概率切在 surrogate pair 中间。**正确做法**：`Buffer.from(value).subarray(0, budget)` 后**手动回溯**到 UTF-8 字符边界（continuation byte 高位 10xxxxxx 即 `>=0x80 && <0xC0`，遇到这种就回退一字节，直到首字节）。`Buffer.subarray.toString("utf8")` 不会自动丢弃尾部不完整字节而是替换成 U+FFFD（`�`）—— 第一次修复掉进了这个坑（测试发现），最终改成显式手动回溯。回归测试 `service.test.ts > "truncates multi-byte UTF-8 content within the byte budget"`：3×budget 的 CJK 字符串切完后必须 `byteLength <= budget + ELLIPSIS_BYTES`，且**不包含 U+FFFD**。
+
+47. **`AlertEngine.evaluateNow` 也要 reentrancy guard**（v0.9.6 — 决策 #37 补全）：v0.9.3 只在 `start()` 的 setInterval 路径加了 `evaluating` 标志。`evaluateNow()` 是测试入口、且未来手动触发评估 REST 端点也会调它——若一个 tick 还没 resolve 时 evaluateNow 被并发调用，两路都看见 `previous=undefined`，对同一 rule 各发一份 "fired" 通知，违反 cooldown。修复 evaluateNow 复用同一 `evaluating` 变量。**不要**给 evaluateNow 单独搞一个标志——必须和 setInterval 共享，否则二者之间也能竞态。
+
+48. **`url-guard` IPv4 patterns 只对解析成 IPv4 的 host 生效**（v0.9.6 修复 — pre-existing bug）：决策 #36 已修了 IPv6 嵌入 IPv4，但 IPv4 patterns 写成 `/^127\./` 等文字模式，会把 `127.example.com` / `10gen.net` 当 loopback / RFC1918 一起拒掉——合法外部 webhook 直接打不通。修复 `src/alerts/channels/url-guard.ts` 拆成两组：`LITERAL_PRIVATE_HOST`（localhost、IPv6 前缀）对原始 host 匹配；`IPV4_PRIVATE_PATTERN`（`/^127\./` `/^10\./` 等 + 新增的 `/^0\./` 覆盖 0.0.0.0/8）**仅当 `isIPv4(host) === true` 时**才匹配。embeddedIPv4 路径同步走 IPv4 表。回归测试 `service.test.ts > "url-guard does not over-match domains that look like IPv4 prefixes"` 与 `"url-guard rejects the entire 0.0.0.0/8 range"`。**不要**把 IPv4 patterns 改回直接 test 任意字符串——`{cdn,gateway}.10gen.net` 一类域名会被误杀。
+
+49. **conversation-probe 必须运行 abandoned-record sweeper**（v0.9.6 修复 — pre-existing memory leak）：channel-only flow 下 host 崩溃 mid-run / sender 永不发 message_sending / 网络抖动让 agent_end 永不触发，对应 record 永留 `state.active`。决策 #16 后单条 record 可达 MB。修复 `src/audit/conversation-probe.ts`：(a) 每个 mutating handler 末尾调 `touch(runId)` 刷 `state.lastTouchedAt` 时间戳；(b) `ABANDON_TTL_MS = 30 * 60_000` + `ABANDON_SWEEP_INTERVAL_MS = 5 * 60_000` 的 setInterval 扫 `state.active`，超时 record 走 `finalize` 并标 `status = "abandoned"`、`errorMessage = "abandoned: no host update for N min"`；(c) `ConversationRecord.status` union 加 `"abandoned"` 选项（决策 #41 测试基线"每段都有内容 + 真 runId"不受影响——abandoned 只是终态多了一种）。`service.start` 调 `probe.startSweeper()`，`service.stop` 调 `stopSweeper()`。**不要**把 TTL 调短到 30 分钟以下——长 prompt + 多 turn agent run 几十分钟正常，误杀活 run 比留几个僵尸 record 损失大。回归测试 `service.test.ts > "sweeper finalizes abandoned active conversations"`。
+
+50. **EventBus.subscribe 是 atomic check-and-add，返回 undefined 表示拒绝**（v0.9.6 修复 — pre-existing TOCTOU bug）：旧 SSE handler 的 `if (bus.size() >= max) { 503 } else { bus.subscribe(...) }` 在并发请求下两个连接都过 size 检查、只有一个真正 subscribe，loser 拿到 no-op unsubscribe + 持续打开的连接，从此收不到任何事件——浏览器看像挂起。修复 `src/outlets/event-bus.ts: subscribe` 改返回 `(() => void) | undefined`：到上限直接 `return undefined`，SSE handler 据此 503 + 立即 end。**不要**把 size() 分离回外面——任何"先看 size，再添加"的两步都会再现 TOCTOU。配套修复 sse-stream.ts 的 `closed` 标志防多次 res.end()。
+
+52. **Lint / Prettier / CI matrix / GH templates 是工程化基线**（v0.9.7 加入）：
+    - ESLint flat config 在 `eslint.config.js`，跑 `typescript-eslint` recommended-type-checked + react-hooks，重点是 `no-floating-promises` / `no-misused-promises` —— 这俩规则覆盖了决策 #22 / #37 / #41 这类异步静默挂死类历史 bug 的整片潜在面。
+    - **HTTP route handler 的 `async` 关键字不要去掉**：`OpenClawPluginHttpRouteHandler` 类型要求 `Promise<boolean>`，handler 写成 `async` 即便没有 `await` 也是对的；ESLint 配置已禁用 `require-await` 规则正是为这层契约。
+    - 测试文件 type-check 走 `tsconfig.eslint.json`（主 tsconfig `exclude: ["*.test.ts"]` 避免编译到 dist；ESLint 需要看见它们）。改 tsconfig 时**必须同步**改 tsconfig.eslint.json。
+    - Prettier 配置锁定**既有事实风格**（双引号 + 分号 + trailingComma:all + 100 char），不要为统一去翻新历史代码 —— 一次性 `npm run format` 已经过；之后只对增量改动应用即可，CI `format:check` 卡住偏移。
+    - CI 矩阵跑 `[22, 24]`，跟 `engines.node: ">=22"` 配套，Node 26 LTS 出来时再加。
+    - GH PR template 与 ISSUE_TEMPLATE bug-report / host-compat 在 `.github/`，运营场景比文字 README 直觉得多。
+    - 发版走 `tags v*.*.*` 触发 `.github/workflows/release.yml` 自动建 GH Release + 用 commit history 生成 release notes；**npm publish 仍是手动一步**，CI 不持 NPM_TOKEN 是有意决策（供应链攻击面控制）。
+
+53. **测试文件按层就近放，不要堆 service.test.ts 一个**（v0.9.7 重构）：CLAUDE.md 原本"测试集中"的指导被误读成"一个文件装全部" —— 实际意图是**就近 + 集中在 src/**（不要 `__tests__/` 目录或 `test/` 顶层）。当前布局：
+    - `src/test-utils.ts` 共享 `makeEvent` 等纯工具（不挂 vitest globals）
+    - `src/storage/ring-buffer.test.ts` / `src/storage/jsonl-store.test.ts`
+    - `src/pipeline/aggregator.test.ts`（合并 runs-tracker）
+    - `src/probes/hook-metrics.test.ts`
+    - `src/audit/conversation-probe.test.ts`（~600 行，体量最大）
+    - `src/alerts/engine.test.ts`
+    - `src/costs/daily-store.test.ts`
+    - `src/insights/queries.test.ts`
+    - `src/service.test.ts` 保留 **service-level 编排** 测试（plugin entry idempotency + event fanout）
+    单文件 1700 行的 ergonomics 不可接受；vitest pattern `src/**/*.test.ts` 不变。**改这些**：新测试就近放到 layer 的 `*.test.ts` 里；service.test.ts 不再吃通用单测。
+
+54. **错误抛出统一加 `code` 字段，不引入 Error 子类**（v0.9.7 决策对齐 Next.js 实际惯例）：项目原约定是裸 `throw new Error(message)`（决策 #21 隐含）。v0.9.7 给**调用方需要 catch + 分支**的位置加 `code` 属性：`url-guard` 的 `URL_GUARD_*`、`dispatcher` 的 `ALERT_CHANNEL_UNKNOWN_KIND`、`dingtalk` 的 `DINGTALK_HTTP_ERROR` / `DINGTALK_API_ERROR`、`webhook` 的 `WEBHOOK_HTTP_ERROR`。**不要**改成 `class HttpError extends Error` 一类的子类层级 —— Next.js 实际源码全用裸 `throw new Error(\`...\`)`，本项目对齐这一点。code 用 `Object.assign(new Error(msg), { code })` 而非 declared class；后续加新 code 时同样模式。
+
+55. **UI v0.9.7 增加 Layout 顶导分组 + 全局时间窗 + 健康横幅 + Sessions 页 + 行内可视化**（编号 51 之后整体一批 UI 改造）：
+    - **Layout 顶导**（`ui/src/components/Layout.tsx`）拆 4 组 (Status / Roll-ups / Drill-down / Audit) 用 `nav-divider` 分隔。`NAV_GROUPS` 是数组的数组，新加导航项加到对应组里 —— **不要**回到平铺 11 项。
+    - **全局时间窗选择器** `ui/src/time-window.tsx`（TimeWindowProvider + useTimeWindow + ?window= URL hash 同步）。当前页面**没有强制订阅** —— 给页面接入时用 `useTimeWindow().window` + `WINDOW_TO_SECONDS[w]`。改 default 时不要破坏 URL fallback。
+    - **Overview 健康横幅**（`Overview.tsx: HealthBanner`）合成 ok/warn/error 三档：error → `recentErrors>5 || errorRate5m>=20%`；warn → 任一阈值过半。**阈值是有意调宽**避免一次 stray error 染红首页。改阈值要改 `computeHealth`。
+    - **Overview lifecycle 第二排 stat card**：消费决策 #51 的合成事件 `session.lifecycle.*` / `agent.compaction.completed` / `tool.result.persisted` / `gateway.lifecycle.started`。读 `data.countsByType` —— 是 cumulative-since-start 视角，要变成"今日"需要 backend 加日级 rollup（未做，留作 follow-up）。
+    - **Sessions 页**（`ui/src/pages/Sessions.tsx` + 路由 + nav）从 `/api/monitor/events?type=session.lifecycle.*` 拉两类事件 client-side 配对成 session 表。**故意不加专门的 sessions REST 端点** —— backend 做的也只是同样的 match，重复工作没必要。需要 server-side 过滤/分页时再升级。
+    - **DimensionTable inline error-rate 横条**（`ui/src/components/DimensionTable.tsx`）`.err-rate-bar` class 在 styles.css；惠及 Sources / Channels / Models / Tools 四页。**不要**改成单独的 column —— 这是 cell 内的辅助视觉。
+    - **Insights HeavyConversations 行内 mag-bar** 显示 tokens 占该页 max 的比例。Recharts 没必要为这点动 BarChart。
+    - **Costs byModel 上方 Recharts BarChart**（horizontal "share of cost"）。颜色硬编码 `#58a6ff` 旁边带 `// matches --accent` 注释（CLAUDE.md UI 规则 #1 允许此 token 同步注释）。
+    - **api.ts 增加 ApiError 类**，`usePolling` 用 `err.friendly()` 渲染；不再把原始 stack 字符串塞进 `.error-banner`。
+
+57. **`extractSource` / `inferEntryKey` 把 host 字面 channel 中的 internal trigger 名当 internal**（v0.9.7.3）：host 在 heartbeat / cron / webhook 触发的 agent run 里把 `ctx.channelId` 设成**字面值**（`"heartbeat"` / `"cron"` / `"webhook"`）而非 INTERNAL_MESSAGE_CHANNEL (`"webchat"`)。原本的 `extractSource` 看到非 webchat 直接 fall-through 到 `channel:<name>`，结果 Sources 页把心跳分类成"Channel: heartbeat"，UX 上像有个叫 heartbeat 的 channel 插件。修复：在两个文件里都加一个 `INTERNAL_TRIGGER_NAMES = new Set(["heartbeat", "cron", "webhook"])` 常量；channel 命中此集合时返回 `internal:<channel>`，绕过 channel:* 分支。也用同一个集合替换原本 `if (trigger === "heartbeat" || trigger === "cron" || ...)` 的写法。**两份必须同时改**（决策 #35）：`src/pipeline/extractors.ts: extractSource` 与 `ui/src/entry-label.ts: inferEntryKey`。未来添加新的 internal trigger 名（比如 `scheduled` / `queue`）只改这两个常量。回归测试 `src/pipeline/extractors.test.ts > "returns internal:<name> when the channel field is itself an internal trigger name"`。
+
+56. **UI 新加的 i18n key 务必中英双补**（决策 #35 已强调，v0.9.7 再次踩到）：本轮加了 ~40 个新 key（`topbar.*` / `overview.health.*` / `overview.lifecycle.*` / `sessions.*` / `empty.logs.hint.*` / `empty.runs.hint.*` / `costs.notice.noTokensHint.*` / `alerts.col.ruleExpr` / `logs.filter.typePrefix` / `conversations.filter.*`），任何一处只在一边加的 i18n key，缺失 locale 会渲染 raw key 字符串。**回归手段**：新 key 落地前在 `zh.ts` 与 `en.ts` grep 一遍 key 名确保两边都在。
+
+51. **新订阅一组 host hook 用 `*.lifecycle.*` 命名空间合成新事件**（v0.9.6 host 能力利用）：决策 #5 / #12 锁定了"hook 是真源"的路线，但项目 v0.9.5 只订阅了 11/34 个 hook。v0.9.6 在 `src/probes/hook-metrics.ts` 增订：
+    - `session_start` / `session_end` → 合成 `session.lifecycle.{started,ended}`（含 `messageCount`、`durationMs`、`reason`），替代用 sessionKey 推断 session 边界的 leaky 方案。
+    - `before_compaction` / `after_compaction` → 合成 `agent.compaction.{started,completed}`（含 `messageCount`、`compactedCount`、`tokenCount`），context-window 利用率信号。
+    - `tool_result_persist` → 合成 `tool.result.persisted`（含 `toolName`、`isSynthetic`、`messageBytes`），补充 tool output 体积可见性。
+    - `gateway_start` / `gateway_stop` → 合成 `gateway.lifecycle.{started,stopped}`（含 `port`、`reason`），清晰的 uptime / 重启历史。
+
+    所有新事件类型是 plugin-private 字符串（host 的 `DiagnosticEventPayload` union 不知道它们）—— 与决策 #25 同样的 cast 处理（`event.type as string`）。`createLogsHandler.inferLogLevel` 给 `gateway.lifecycle.stopped` 映射成 warn（运维重要事件），其余走默认 info。**不要**给这些新事件加 aggregator dimension —— 它们目前是 Events / Logs 页 + Logs typePrefix 过滤的纯透传信号；要做 dashboard widget 再单独提决策块。新增 hook 全套**不影响**任何既有 hook 流程（hook-metrics 内每个 api.on() 是独立 listener；hook 执行顺序由 host 控制，本插件不依赖）。
+
 ## 与 OpenClaw host 的接口契约
 
 只用 SDK 公开 barrel，不要触碰别的子路径：

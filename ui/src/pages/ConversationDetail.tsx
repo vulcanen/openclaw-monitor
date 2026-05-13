@@ -82,8 +82,10 @@ function buildTimeline(record: ConversationRecord): TimelineItem[] {
 function formatTime(iso: string): string {
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return iso;
-  return new Date(ms).toLocaleTimeString(undefined, { hour12: false }) +
-    `.${String(new Date(ms).getMilliseconds()).padStart(3, "0")}`;
+  return (
+    new Date(ms).toLocaleTimeString(undefined, { hour12: false }) +
+    `.${String(new Date(ms).getMilliseconds()).padStart(3, "0")}`
+  );
 }
 
 function Card({
@@ -139,9 +141,7 @@ function Card({
             {badges}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-            {truncated ? (
-              <span className="tag warn">{t("common.truncated")}</span>
-            ) : null}
+            {truncated ? <span className="tag warn">{t("common.truncated")}</span> : null}
             <span
               style={{
                 color: "var(--text-dim)",
@@ -212,9 +212,7 @@ function HistoryDetails({
   if (!messages || messages.length === 0) return null;
   return (
     <details style={{ marginTop: 8 }}>
-      <summary style={{ cursor: "pointer", color: "var(--accent)", fontSize: 12 }}>
-        {label}
-      </summary>
+      <summary style={{ cursor: "pointer", color: "var(--accent)", fontSize: 12 }}>{label}</summary>
       <div
         style={{
           marginTop: 8,
@@ -245,7 +243,13 @@ function HistoryDetails({
   );
 }
 
-function InboundCardView({ item, t }: { item: Extract<TimelineItem, { kind: "inbound" }>; t: TranslateFn }) {
+function InboundCardView({
+  item,
+  t,
+}: {
+  item: Extract<TimelineItem, { kind: "inbound" }>;
+  t: TranslateFn;
+}) {
   const { data } = item;
   const badges = (
     <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
@@ -272,7 +276,13 @@ function InboundCardView({ item, t }: { item: Extract<TimelineItem, { kind: "inb
   );
 }
 
-function LlmHopCardView({ item, t }: { item: Extract<TimelineItem, { kind: "llmHop" }>; t: TranslateFn }) {
+function LlmHopCardView({
+  item,
+  t,
+}: {
+  item: Extract<TimelineItem, { kind: "llmHop" }>;
+  t: TranslateFn;
+}) {
   const ref = item.output ?? item.input;
   const provider = ref?.provider ?? "?";
   const model = ref?.model ?? "?";
@@ -298,8 +308,7 @@ function LlmHopCardView({ item, t }: { item: Extract<TimelineItem, { kind: "llmH
       ) : null}
       {item.input?.imagesCount ? (
         <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
-          ·{" "}
-          {t("conversationDetail.label.images", { count: item.input.imagesCount })}
+          · {t("conversationDetail.label.images", { count: item.input.imagesCount })}
         </span>
       ) : null}
     </>
@@ -345,19 +354,26 @@ function LlmHopCardView({ item, t }: { item: Extract<TimelineItem, { kind: "llmH
       )}
 
       {item.output && item.output.assistantTexts.some((s) => s.length > 0) ? (
-        <>
-          {item.output.assistantTexts.map((text, ti) => (
-            <ContentBlock
-              key={ti}
-              label={
-                item.output!.assistantTexts.length > 1
-                  ? t("conversationDetail.label.assistantText", { n: ti + 1 })
-                  : t("conversationDetail.timeline.assistantReply")
-              }
-              content={text}
-            />
-          ))}
-        </>
+        (() => {
+          // Bind once so TS narrows item.output inside .map without needing
+          // a non-null assertion (lint flags `item.output!`).
+          const out = item.output;
+          return (
+            <>
+              {out.assistantTexts.map((text, ti) => (
+                <ContentBlock
+                  key={ti}
+                  label={
+                    out.assistantTexts.length > 1
+                      ? t("conversationDetail.label.assistantText", { n: ti + 1 })
+                      : t("conversationDetail.timeline.assistantReply")
+                  }
+                  content={text}
+                />
+              ))}
+            </>
+          );
+        })()
       ) : (
         <div
           style={{
@@ -383,7 +399,13 @@ function LlmHopCardView({ item, t }: { item: Extract<TimelineItem, { kind: "llmH
   );
 }
 
-function OutboundCardView({ item, t }: { item: Extract<TimelineItem, { kind: "outbound" }>; t: TranslateFn }) {
+function OutboundCardView({
+  item,
+  t,
+}: {
+  item: Extract<TimelineItem, { kind: "outbound" }>;
+  t: TranslateFn;
+}) {
   const { data } = item;
   const badges = (
     <span className={data.success ? "tag ok" : "tag error"}>
@@ -422,11 +444,7 @@ function OutboundCardView({ item, t }: { item: Extract<TimelineItem, { kind: "ou
         const isAssistantText = m.role === "assistant" && typeof m.content === "string";
         if (isAssistantText) {
           return (
-            <ContentBlock
-              key={idx}
-              label={m.to ? `to ${m.to}` : undefined}
-              content={m.content as string}
-            />
+            <ContentBlock key={idx} label={m.to ? `to ${m.to}` : undefined} content={m.content} />
           );
         }
         return (
@@ -448,14 +466,15 @@ function OutboundCardView({ item, t }: { item: Extract<TimelineItem, { kind: "ou
   );
 }
 
-function ErrorCardView({ item, t }: { item: Extract<TimelineItem, { kind: "error" }>; t: TranslateFn }) {
+function ErrorCardView({
+  item,
+  t,
+}: {
+  item: Extract<TimelineItem, { kind: "error" }>;
+  t: TranslateFn;
+}) {
   return (
-    <Card
-      marker="error"
-      title={t("conversationDetail.timeline.error")}
-      at={item.at}
-      t={t}
-    >
+    <Card marker="error" title={t("conversationDetail.timeline.error")} at={item.at} t={t}>
       <pre
         style={{
           whiteSpace: "pre-wrap",
@@ -504,9 +523,14 @@ export function ConversationDetail() {
     <div>
       <Link to="/conversations">{t("conversationDetail.backToList")}</Link>
       <h2 className="page-title" style={{ marginTop: 12 }}>
-        {t("conversationDetail.title", { runId: "" })}
-        <code>{runId}</code>
+        {t("conversationDetail.titleShort")}
       </h2>
+      {/* runId moved out of h2 (v0.9.7) — long mono strings inside a 20px
+          heading hurt readability. The subtitle slot already uses --mono
+          friendly sizing. */}
+      <div className="subtitle">
+        <code>{runId}</code>
+      </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
       {!data ? <div className="empty">{t("common.loading")}</div> : null}
@@ -535,9 +559,7 @@ export function ConversationDetail() {
                 </tr>
                 <tr>
                   <td>{t("conversationDetail.row.channelTrigger")}</td>
-                  <td>
-                    {data.conversation.trigger ?? data.conversation.channelId ?? "—"}
-                  </td>
+                  <td>{data.conversation.trigger ?? data.conversation.channelId ?? "—"}</td>
                 </tr>
                 <tr>
                   <td>{t("conversationDetail.row.started")}</td>

@@ -31,7 +31,13 @@ export async function sendWebhook(
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`webhook ${config.url} responded ${res.status}`);
+      const err = new Error(`webhook ${config.url} responded ${res.status}`) as Error & {
+        code: string;
+        httpStatus: number;
+      };
+      err.code = "WEBHOOK_HTTP_ERROR";
+      err.httpStatus = res.status;
+      throw err;
     }
   } finally {
     clearTimeout(timer);

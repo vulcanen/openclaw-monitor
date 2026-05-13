@@ -13,15 +13,55 @@ const MAX_RECENT_COMPLETED = 50;
 const MAX_HISTORY_ITEMS = 64;
 const PLUGIN_ID = "openclaw-monitor";
 
+// Sweeper for abandoned conversations: channel-only flows can leave a
+// record in `state.active` indefinitely when the sender never sends a
+// follow-up message_sending (IRC bot disconnects, host crash mid-run, a
+// hook ordering edge case we haven't seen yet). Each record holds the
+// captured inbound/llm content — historically up to MB per record with
+// `contentMaxBytes=1MiB` — so an unbounded `state.active` is a real
+// memory leak. The sweeper finalizes records with no touches in
+// ABANDON_TTL_MS as status="abandoned" so they:
+//   (a) get appended to the JSONL audit store with a clear marker
+//   (b) leave state.active so memory is bounded
+// Sweep cadence is generous; the goal is bounding leak rate, not
+// catching every stuck run within seconds.
+const ABANDON_TTL_MS = 30 * 60_000; // 30 min — covers all sane real-run durations
+const ABANDON_SWEEP_INTERVAL_MS = 5 * 60_000; // 5 min — bound on leak detection lag
+
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function truncateString(value: string | undefined, max: number): { value: string | undefined; truncated: boolean } {
+function truncateString(
+  value: string | undefined,
+  max: number,
+): { value: string | undefined; truncated: boolean } {
   if (value === undefined) return { value: undefined, truncated: false };
-  if (Buffer.byteLength(value, "utf-8") <= max) return { value, truncated: false };
-  const slice = value.slice(0, Math.max(0, max - ELLIPSIS.length));
-  return { value: `${slice}${ELLIPSIS}`, truncated: true };
+  const totalBytes = Buffer.byteLength(value, "utf-8");
+  if (totalBytes <= max) return { value, truncated: false };
+  // String#slice indexes by UTF-16 code unit; mixing it with a byte-length
+  // budget under-shoots wildly for CJK / emoji (1 char ≈ 3-4 bytes), and
+  // can slice a surrogate pair in half. Slice in the byte domain — but
+  // align the cut to a UTF-8 character boundary so we don't end on a
+  // partial multi-byte sequence (which Node's Buffer#toString emits as a
+  // U+FFFD replacement character, the visual `�`).
+  //
+  // UTF-8 continuation bytes have the bit pattern 10xxxxxx (>= 0x80, < 0xC0).
+  // Walk back from `budget` until the byte at that position is either ASCII
+  // or a start byte — that position is a valid code-point boundary.
+  const ellipsisBytes = Buffer.byteLength(ELLIPSIS, "utf-8");
+  const budget = Math.max(0, max - ellipsisBytes);
+  const buf = Buffer.from(value, "utf-8");
+  let cut = Math.min(budget, buf.length);
+  while (cut > 0) {
+    const byte = buf[cut];
+    // If `cut` is at end-of-buffer, or the byte at `cut` is NOT a
+    // continuation byte, then `cut` sits on a code-point boundary.
+    if (byte === undefined || byte < 0x80 || byte >= 0xc0) break;
+    cut -= 1;
+  }
+  const head = buf.subarray(0, cut).toString("utf-8");
+  return { value: `${head}${ELLIPSIS}`, truncated: true };
 }
 
 function clampArray<T>(items: T[], max: number): { items: T[]; truncated: boolean } {
@@ -36,6 +76,15 @@ export type ConversationProbe = {
   setStore: (store: ConversationStore | undefined) => void;
   recentCompleted: () => ConversationRecord[];
   activeCount: () => number;
+  /**
+   * Start the periodic sweeper that finalizes records in `state.active`
+   * that have had no host updates for ABANDON_TTL_MS. Idempotent; safe to
+   * call from service.start. Wired in v0.9.6.
+   */
+  startSweeper: () => void;
+  stopSweeper: () => void;
+  /** Test hook: force one immediate sweep pass and return how many were swept. */
+  sweepAbandonedNow: () => number;
   reset: () => void;
 };
 
@@ -45,6 +94,9 @@ type ProbeState = {
   active: Map<string, ConversationRecord>;
   bySessionKey: Map<string, string>;
   recent: ConversationRecord[];
+  /** Wall-clock ms of the last mutation per active record. Used by the
+   *  abandoned-sweeper to age out stuck records. */
+  lastTouchedAt: Map<string, number>;
 };
 
 const DISABLED_CONFIG: AuditConfig = {
@@ -87,6 +139,15 @@ export function createConversationProbe(): ConversationProbe {
     active: new Map(),
     bySessionKey: new Map(),
     recent: [],
+    lastTouchedAt: new Map(),
+  };
+  let sweepTimer: NodeJS.Timeout | undefined;
+
+  /** Refresh the abandoned-sweeper timestamp for a record. Called from
+   *  every hook handler that mutates a record so live runs are protected
+   *  from the TTL even when they last for hours. */
+  const touch = (runId: string): void => {
+    state.lastTouchedAt.set(runId, Date.now());
   };
 
   // Look up an existing record by (sessionKey || runId), or create a new one.
@@ -115,10 +176,12 @@ export function createConversationProbe(): ConversationProbe {
           // for channel-based flows even though we did capture the data.
           if (runId && runId !== linked.runId && linked.runId.startsWith("ctrl_")) {
             state.active.delete(linked.runId);
+            state.lastTouchedAt.delete(linked.runId);
             linked.runId = runId;
             state.active.set(runId, linked);
             state.bySessionKey.set(sessionKey, runId);
           }
+          touch(linked.runId);
           return linked;
         }
       }
@@ -130,6 +193,7 @@ export function createConversationProbe(): ConversationProbe {
         if (sessionKey && !state.bySessionKey.has(sessionKey)) {
           state.bySessionKey.set(sessionKey, byRun.runId);
         }
+        touch(byRun.runId);
         return byRun;
       }
     }
@@ -152,6 +216,7 @@ export function createConversationProbe(): ConversationProbe {
     };
     state.active.set(effectiveRunId, fresh);
     if (sessionKey) state.bySessionKey.set(sessionKey, effectiveRunId);
+    touch(effectiveRunId);
     return fresh;
   };
 
@@ -178,6 +243,7 @@ export function createConversationProbe(): ConversationProbe {
       }
     }
     state.active.delete(record.runId);
+    state.lastTouchedAt.delete(record.runId);
     if (record.sessionKey) state.bySessionKey.delete(record.sessionKey);
     state.recent.push(record);
     if (state.recent.length > MAX_RECENT_COMPLETED) {
@@ -196,7 +262,10 @@ export function createConversationProbe(): ConversationProbe {
     api.on("before_prompt_build", (event, ctx) => {
       if (!state.config.enabled) return;
       const record = findOrCreateRecord(
-        { ...(ctx.runId !== undefined ? { runId: ctx.runId } : {}), ...(ctx.sessionKey !== undefined ? { sessionKey: ctx.sessionKey } : {}) },
+        {
+          ...(ctx.runId !== undefined ? { runId: ctx.runId } : {}),
+          ...(ctx.sessionKey !== undefined ? { sessionKey: ctx.sessionKey } : {}),
+        },
         {
           ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
           ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
@@ -355,6 +424,7 @@ export function createConversationProbe(): ConversationProbe {
         truncated: promptResult.truncated || systemResult.truncated || history.truncated,
       };
       record.llmInputs.push(segment);
+      touch(record.runId);
     });
 
     api.on("llm_output", (event, ctx) => {
@@ -389,6 +459,7 @@ export function createConversationProbe(): ConversationProbe {
         truncated,
       };
       record.llmOutputs.push(segment);
+      touch(record.runId);
     });
 
     api.on("agent_end", (event, ctx) => {
@@ -476,24 +547,53 @@ export function createConversationProbe(): ConversationProbe {
       // (trigger starts with "diag:"). Hook-driven records finalize via
       // agent_end or message_sending and shouldn't be touched here.
       if (!record.trigger?.startsWith("diag:")) return;
-      finalize(
-        { runId: record.runId, sessionKey },
-        (rec) => {
-          rec.status = evt.outcome === "error" ? "error" : "completed";
-          if (evt.error) rec.errorMessage = evt.error;
-          if (typeof evt.durationMs === "number") rec.durationMs = evt.durationMs;
-          // No content to record. Mark this record as diagnostic-only so the
-          // UI can render an informative empty state instead of pretending we
-          // missed the content capture.
-          rec.outbound = {
-            capturedAt: nowIso(),
-            success: evt.outcome !== "error",
-            messages: [],
-            truncated: false,
-          };
-        },
-      );
+      finalize({ runId: record.runId, sessionKey }, (rec) => {
+        rec.status = evt.outcome === "error" ? "error" : "completed";
+        if (evt.error) rec.errorMessage = evt.error;
+        if (typeof evt.durationMs === "number") rec.durationMs = evt.durationMs;
+        // No content to record. Mark this record as diagnostic-only so the
+        // UI can render an informative empty state instead of pretending we
+        // missed the content capture.
+        rec.outbound = {
+          capturedAt: nowIso(),
+          success: evt.outcome !== "error",
+          messages: [],
+          truncated: false,
+        };
+      });
     }
+  };
+
+  const sweepAbandoned = (nowMs: number): number => {
+    if (state.active.size === 0) return 0;
+    let swept = 0;
+    // Snapshot keys before iterating so finalize() can mutate state.active.
+    const candidates: string[] = [];
+    for (const [runId, touchedMs] of state.lastTouchedAt) {
+      if (nowMs - touchedMs >= ABANDON_TTL_MS) candidates.push(runId);
+    }
+    for (const runId of candidates) {
+      const record = state.active.get(runId);
+      if (!record) {
+        state.lastTouchedAt.delete(runId);
+        continue;
+      }
+      const target: { runId?: string; sessionKey?: string } = { runId };
+      if (record.sessionKey !== undefined) target.sessionKey = record.sessionKey;
+      finalize(target, (rec) => {
+        rec.status = "abandoned";
+        // Preserve any existing errorMessage; only set when empty so we
+        // don't overwrite a real error finalize that lost its race with
+        // the sweeper.
+        if (!rec.errorMessage) {
+          rec.errorMessage = `abandoned: no host update for ${Math.round(
+            ABANDON_TTL_MS / 60_000,
+          )} min`;
+        }
+      });
+      swept += 1;
+    }
+    return swept;
   };
 
   return {
@@ -507,9 +607,26 @@ export function createConversationProbe(): ConversationProbe {
     },
     recentCompleted: () => [...state.recent].reverse(),
     activeCount: () => state.active.size,
+    startSweeper: () => {
+      if (sweepTimer) return;
+      sweepTimer = setInterval(() => {
+        try {
+          sweepAbandoned(Date.now());
+        } catch {
+          // never let the sweeper throw — it'd crash the gateway interval.
+        }
+      }, ABANDON_SWEEP_INTERVAL_MS);
+      sweepTimer.unref?.();
+    },
+    stopSweeper: () => {
+      if (sweepTimer) clearInterval(sweepTimer);
+      sweepTimer = undefined;
+    },
+    sweepAbandonedNow: () => sweepAbandoned(Date.now()),
     reset: () => {
       state.active.clear();
       state.bySessionKey.clear();
+      state.lastTouchedAt.clear();
       state.recent.length = 0;
     },
   };

@@ -1,0 +1,74 @@
+name: Bug report
+description: Something the dashboard mis-renders or a host event the plugin mis-handles.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Bugs that include a host version + a minimal reproduction get fixed fastest. For sensitive issues (auth bypass, data exfiltration, secret exposure) please follow [SECURITY.md](../blob/main/SECURITY.md) instead.
+  - type: input
+    id: host-version
+    attributes:
+      label: OpenClaw host version
+      description: Run `openclaw --version` on the host.
+      placeholder: e.g. 2026.5.7
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: |
+        Either copy from the dashboard's About line, or run:
+        `cat ~/.openclaw/npm/node_modules/@vulcanen/openclaw-monitor/package.json | jq .version`
+      placeholder: e.g. 0.9.6
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: `node --version` on the gateway host.
+      placeholder: e.g. v22.10.0
+    validations:
+      required: true
+  - type: dropdown
+    id: dashboard-page
+    attributes:
+      label: Affected dashboard page
+      options:
+        - Overview
+        - Sources
+        - Channels
+        - Models
+        - Tools
+        - Runs / Run Detail
+        - Conversations / Conversation Detail
+        - Costs
+        - Logs
+        - Insights
+        - Alerts
+        - Not a dashboard issue (backend / hook capture)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: |
+        Minimal steps to reproduce. Include any config snippet, the request pattern that triggers it, and what you expected to see vs what was rendered.
+      placeholder: |
+        1. Configure plugin with ...
+        2. Send a request to /v1/chat/completions
+        3. Open /monitor and click the Costs tab
+        4. Expected: cost > 0. Actual: cost = 0, no banner shown.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log excerpts
+      description: |
+        From `/tmp/openclaw/openclaw-*.log` (host's structured log, NOT the systemd journal). Trim aggressively — only lines around the bad behaviour.
+      render: shell

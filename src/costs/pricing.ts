@@ -1,8 +1,4 @@
-import type {
-  ModelPrice,
-  PricingConfig,
-  TokenRecordedEvent,
-} from "./types.js";
+import type { ModelPrice, PricingConfig, TokenRecordedEvent } from "./types.js";
 
 /**
  * Per-token-class cost figures + their sum, given a usage block and a

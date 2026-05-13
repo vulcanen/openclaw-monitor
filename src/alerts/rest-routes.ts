@@ -40,8 +40,7 @@ export function createAlertsHistoryHandler(engine: AlertEngine): OpenClawPluginH
   return async (req: IncomingMessage, res: ServerResponse) => {
     const params = parseQuery(req.url);
     const limitRaw = Number.parseInt(params.get("limit") ?? "100", 10);
-    const limit =
-      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
     writeJson(res, 200, {
       generatedAt: new Date().toISOString(),
       count: engine.history.size(),

@@ -49,7 +49,6 @@ function listFiles(dir: string): Array<{ file: string; day: string }> {
   return out.sort((a, b) => a.day.localeCompare(b.day));
 }
 
-
 export function createConversationStore(rootDir: string): ConversationStore {
   ensureDir(rootDir);
 
@@ -155,7 +154,11 @@ export function createConversationStore(rootDir: string): ConversationStore {
     // to a full scan once and refresh the index along the way.
     for (const { file } of listFiles(rootDir).reverse()) {
       const mtime = (() => {
-        try { return fs.statSync(file).mtimeMs; } catch { return 0; }
+        try {
+          return fs.statSync(file).mtimeMs;
+        } catch {
+          return 0;
+        }
       })();
       if (fileMtimeAtIndex.get(file) === mtime) continue; // unchanged since indexed
       indexFile(file);

@@ -100,8 +100,7 @@ export function createDailyCostStore(rootDir: string): DailyCostStore {
   // The plugin's stop() path calls flush() synchronously to drain.
   let flushTimer: NodeJS.Timeout | undefined;
 
-  const filePath = (day: string): string =>
-    path.join(rootDir, `daily-costs-${day}.json`);
+  const filePath = (day: string): string => path.join(rootDir, `daily-costs-${day}.json`);
 
   const load = (day: string): DailyCostFile => {
     const cached = cache.get(day);
@@ -198,7 +197,7 @@ export function createDailyCostStore(rootDir: string): DailyCostStore {
         if (!entry.isFile()) continue;
         const match = FILENAME_RE.exec(entry.name);
         if (!match) continue;
-        out.push(match[1] as string);
+        out.push(match[1]);
       }
       // Folded any in-memory day not yet flushed.
       for (const day of cache.keys()) {

@@ -106,12 +106,30 @@ function makeRunContextRegistry() {
   return { set, get, scheduleEvict };
 }
 
+// OpenClaw's plugin loader may invoke `register(api)` multiple times per
+// process (different load profiles / cache-miss re-runs — see index.ts).
+// Each pass receives its own `api` object whose `api.on(...)` listeners are
+// scoped to that load profile's hook registry; we *do* need to register on
+// every distinct `api` so hooks fire for every registry. But if the SAME
+// `api` object is passed twice (cache invalidation, hot reload, etc.) we'd
+// stack a second listener on top of the first, and a single hook firing
+// would inject TWO synthesized events into the fanout.
+//
+// For events with a callId / toolCallId the fanout's dedup absorbs the
+// duplicate. But `llm.tokens.recorded` and `harness.run.*` synthesized
+// here carry neither — so a duplicate listener would double-count cost
+// (and tokens, and the daily-cost JSONL rollup). Guard against that by
+// remembering which `api` objects we already installed on.
+const installedApis = new WeakSet<OpenClawPluginApi>();
+
 export function installHookMetrics(params: {
   api: OpenClawPluginApi;
   fanout: EventFanout;
   pricing?: PricingRef;
 }): void {
   const { api, fanout } = params;
+  if (installedApis.has(api)) return;
+  installedApis.add(api);
   const pricing = params.pricing ?? createPricingRef();
   const runCtx = makeRunContextRegistry();
   let tokenSeq = 0;
@@ -263,6 +281,125 @@ export function installHookMetrics(params: {
     if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
     if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
     if (ctx.trigger !== undefined) synth["trigger"] = ctx.trigger;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Session lifecycle (v0.9.6) ────────────────────────────────────────
+  // The host emits `session.stalled` / `session.stuck` as per-session
+  // attention signals, but never an explicit "session started" / "session
+  // ended" event for external plugins. session_start / session_end hooks
+  // fill that gap: now Overview can show "N sessions active right now"
+  // and Logs / Events surfaces who's joining and leaving with reason +
+  // duration. Synthesized as `session.lifecycle.*` to keep them grouped
+  // under one event-type prefix (helpful with the new Logs typePrefix
+  // filter).
+  api.on("session_start", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "session.lifecycle.started",
+      sessionId: event.sessionId,
+    };
+    if (event.sessionKey !== undefined) synth["sessionKey"] = event.sessionKey;
+    if (event.resumedFrom !== undefined) synth["resumedFrom"] = event.resumedFrom;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  api.on("session_end", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "session.lifecycle.ended",
+      sessionId: event.sessionId,
+      messageCount: event.messageCount,
+    };
+    if (event.sessionKey !== undefined) synth["sessionKey"] = event.sessionKey;
+    if (event.reason !== undefined) synth["reason"] = event.reason;
+    if (typeof event.durationMs === "number") synth["durationMs"] = event.durationMs;
+    if (event.transcriptArchived !== undefined) {
+      synth["transcriptArchived"] = event.transcriptArchived;
+    }
+    if (event.nextSessionId !== undefined) synth["nextSessionId"] = event.nextSessionId;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Compaction lifecycle (v0.9.6) ─────────────────────────────────────
+  // before/after_compaction expose the agent's context-window pressure:
+  // how often we compact, how many messages get rolled into history, and
+  // (when available) the token count before vs after. This is the
+  // strongest single signal of cost + quality risk — frequent compaction
+  // means the agent is losing context and cost is bloating with system-
+  // prompt re-injection.
+  api.on("before_compaction", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "agent.compaction.started",
+      messageCount: event.messageCount,
+    };
+    if (event.compactingCount !== undefined) synth["compactingCount"] = event.compactingCount;
+    if (event.tokenCount !== undefined) synth["tokenCount"] = event.tokenCount;
+    if (ctx.sessionId !== undefined) synth["sessionId"] = ctx.sessionId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  api.on("after_compaction", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "agent.compaction.completed",
+      messageCount: event.messageCount,
+      compactedCount: event.compactedCount,
+    };
+    if (event.tokenCount !== undefined) synth["tokenCount"] = event.tokenCount;
+    if (ctx.sessionId !== undefined) synth["sessionId"] = ctx.sessionId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Tool result persistence (v0.9.6) ──────────────────────────────────
+  // Complements after_tool_call by surfacing the *post-processing* step
+  // where the tool result becomes a persisted AgentMessage. Useful to
+  // detect synthetic results (host-injected without a real tool run)
+  // and to spot tools that emit huge messages (output bytes correlate
+  // with downstream context-window pressure).
+  api.on("tool_result_persist", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "tool.result.persisted",
+    };
+    if (event.toolName !== undefined) synth["toolName"] = event.toolName;
+    if (event.toolCallId !== undefined) synth["toolCallId"] = event.toolCallId;
+    if (event.isSynthetic !== undefined) synth["isSynthetic"] = event.isSynthetic;
+    // Best-effort message byte budget — the AgentMessage shape varies
+    // by host version, but most fields fit JSON.stringify. Failure to
+    // measure is non-fatal.
+    try {
+      const msg = event.message as unknown;
+      const json = JSON.stringify(msg ?? null);
+      synth["messageBytes"] = json.length;
+    } catch {
+      // ignore
+    }
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Gateway lifecycle (v0.9.6) ────────────────────────────────────────
+  // Cleaner "uptime / last restart" surface than inferring from the
+  // replay path's reduction in event flow. The Overview page can show
+  // "gateway started at <iso>" and "restart count today" using these.
+  api.on("gateway_start", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "gateway.lifecycle.started",
+      port: event.port,
+    };
+    if (ctx.workspaceDir !== undefined) synth["workspaceDir"] = ctx.workspaceDir;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  api.on("gateway_stop", (event, _ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "gateway.lifecycle.stopped",
+    };
+    if (event.reason !== undefined) synth["reason"] = event.reason;
     fanout.inject(synth as DiagnosticEventPayload);
   });
 

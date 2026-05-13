@@ -32,10 +32,7 @@ export function createInsightsQueries(deps: {
    * Top-N slowest model.call.completed events inside [now - windowSec, now].
    * Sorted by durationMs descending. Cap on rows = `limit`.
    */
-  const slowCalls = (params: {
-    windowSec: number;
-    limit: number;
-  }): SlowCallRow[] => {
+  const slowCalls = (params: { windowSec: number; limit: number }): SlowCallRow[] => {
     const cutoff = Date.now() - params.windowSec * 1000;
     // Pull the whole buffer ring for the type — 1024 entries by default
     // is fine; if an operator tunes maxPerType higher we get more. We
@@ -45,23 +42,20 @@ export function createInsightsQueries(deps: {
     for (const item of items) {
       if (item.capturedAt < cutoff) continue;
       const raw = item.event as unknown as Record<string, unknown>;
-      const duration =
-        typeof raw["durationMs"] === "number" ? (raw["durationMs"] as number) : undefined;
+      const duration = typeof raw["durationMs"] === "number" ? raw["durationMs"] : undefined;
       if (typeof duration !== "number") continue;
       rows.push({
         capturedAt: item.capturedAt,
         durationMs: duration,
-        ...(typeof raw["provider"] === "string" ? { provider: raw["provider"] as string } : {}),
-        ...(typeof raw["model"] === "string" ? { model: raw["model"] as string } : {}),
-        ...(typeof raw["runId"] === "string" ? { runId: raw["runId"] as string } : {}),
-        ...(typeof raw["callId"] === "string" ? { callId: raw["callId"] as string } : {}),
-        ...(typeof raw["sessionKey"] === "string"
-          ? { sessionKey: raw["sessionKey"] as string }
-          : {}),
-        ...(typeof raw["channel"] === "string" ? { channel: raw["channel"] as string } : {}),
-        ...(typeof raw["trigger"] === "string" ? { trigger: raw["trigger"] as string } : {}),
+        ...(typeof raw["provider"] === "string" ? { provider: raw["provider"] } : {}),
+        ...(typeof raw["model"] === "string" ? { model: raw["model"] } : {}),
+        ...(typeof raw["runId"] === "string" ? { runId: raw["runId"] } : {}),
+        ...(typeof raw["callId"] === "string" ? { callId: raw["callId"] } : {}),
+        ...(typeof raw["sessionKey"] === "string" ? { sessionKey: raw["sessionKey"] } : {}),
+        ...(typeof raw["channel"] === "string" ? { channel: raw["channel"] } : {}),
+        ...(typeof raw["trigger"] === "string" ? { trigger: raw["trigger"] } : {}),
         ...(typeof raw["responseStreamBytes"] === "number"
-          ? { responseStreamBytes: raw["responseStreamBytes"] as number }
+          ? { responseStreamBytes: raw["responseStreamBytes"] }
           : {}),
       });
     }
@@ -121,9 +115,7 @@ export function createInsightsQueries(deps: {
         llmHops: record.llmInputs.length,
         totalTokensIn: tIn,
         totalTokensOut: tOut,
-        ...(record.inbound?.prompt
-          ? { promptPreview: record.inbound.prompt.slice(0, 160) }
-          : {}),
+        ...(record.inbound?.prompt ? { promptPreview: record.inbound.prompt.slice(0, 160) } : {}),
       });
     }
     // 2. Persisted summaries: pull a generous slice (top 500 sessions for
@@ -156,10 +148,7 @@ export function createInsightsQueries(deps: {
       if (!startInWindow && !endInWindow) continue;
       rows.push(s);
     }
-    rows.sort(
-      (a, b) =>
-        b.totalTokensIn + b.totalTokensOut - (a.totalTokensIn + a.totalTokensOut),
-    );
+    rows.sort((a, b) => b.totalTokensIn + b.totalTokensOut - (a.totalTokensIn + a.totalTokensOut));
     return rows.slice(0, params.limit);
   };
 
@@ -168,21 +157,18 @@ export function createInsightsQueries(deps: {
    * inside the window. Used to answer "what's failing the most and
    * which provider/model is responsible?".
    */
-  const errorClusters = (params: {
-    windowSec: number;
-    limit: number;
-  }): ErrorClusterRow[] => {
+  const errorClusters = (params: { windowSec: number; limit: number }): ErrorClusterRow[] => {
     const cutoff = Date.now() - params.windowSec * 1000;
     const items = deps.buffer.recent({ type: "model.call.error", limit: 2048 });
     const clusters = new Map<string, ErrorClusterRow>();
     for (const item of items) {
       if (item.capturedAt < cutoff) continue;
       const raw = item.event as unknown as Record<string, unknown>;
-      const provider = typeof raw["provider"] === "string" ? (raw["provider"] as string) : undefined;
-      const model = typeof raw["model"] === "string" ? (raw["model"] as string) : undefined;
+      const provider = typeof raw["provider"] === "string" ? raw["provider"] : undefined;
+      const model = typeof raw["model"] === "string" ? raw["model"] : undefined;
       const errorCategory =
-        typeof raw["errorCategory"] === "string" ? (raw["errorCategory"] as string) : "unknown";
-      const runId = typeof raw["runId"] === "string" ? (raw["runId"] as string) : undefined;
+        typeof raw["errorCategory"] === "string" ? raw["errorCategory"] : "unknown";
+      const runId = typeof raw["runId"] === "string" ? raw["runId"] : undefined;
       const key = `${provider ?? "unknown"}/${model ?? "unknown"} · ${errorCategory}`;
       const existing = clusters.get(key);
       if (existing) {
@@ -213,20 +199,19 @@ export function createInsightsQueries(deps: {
    * (browse / fetch / shell / mcp:* / etc.) that's quietly inflating
    * agent retry loops.
    */
-  const toolFailures = (params: {
-    windowSec: number;
-    limit: number;
-  }): ToolFailureRow[] => {
+  const toolFailures = (params: { windowSec: number; limit: number }): ToolFailureRow[] => {
     const cutoff = Date.now() - params.windowSec * 1000;
-    const totals = new Map<string, { total: number; errors: number; lastFailureAt?: number; sampleRunIds: string[] }>();
+    const totals = new Map<
+      string,
+      { total: number; errors: number; lastFailureAt?: number; sampleRunIds: string[] }
+    >();
     for (const type of ["tool.execution.completed", "tool.execution.error"] as const) {
       const items = deps.buffer.recent({ type, limit: 2048 });
       for (const item of items) {
         if (item.capturedAt < cutoff) continue;
         const raw = item.event as unknown as Record<string, unknown>;
-        const toolName =
-          typeof raw["toolName"] === "string" ? (raw["toolName"] as string) : "unknown";
-        const runId = typeof raw["runId"] === "string" ? (raw["runId"] as string) : undefined;
+        const toolName = typeof raw["toolName"] === "string" ? raw["toolName"] : "unknown";
+        const runId = typeof raw["runId"] === "string" ? raw["runId"] : undefined;
         const entry = totals.get(toolName) ?? {
           total: 0,
           errors: 0,

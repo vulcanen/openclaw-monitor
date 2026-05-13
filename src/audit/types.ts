@@ -40,7 +40,18 @@ export type ConversationRecord = {
   agentId?: string;
   channelId?: string;
   trigger?: string;
-  status: "active" | "completed" | "error";
+  /**
+   * Lifecycle status of the conversation.
+   * - `active`     — in flight; final hook (agent_end / message_sending) not yet seen.
+   * - `completed`  — finalized normally.
+   * - `error`      — finalized with a failure signal.
+   * - `abandoned`  — sweeper finalized a stuck record after `ABANDON_TTL_MS`
+   *                  of inactivity (host crashed mid-run, channel sender
+   *                  never followed up, etc.). Distinguished from `error` so
+   *                  operators don't confuse "we lost the run" with "the run
+   *                  actually failed".
+   */
+  status: "active" | "completed" | "error" | "abandoned";
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
