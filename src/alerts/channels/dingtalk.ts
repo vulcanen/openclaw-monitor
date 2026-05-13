@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { AlertNotification, DingTalkChannelConfig } from "../types.js";
+import { assertSafeChannelUrl } from "./url-guard.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -71,6 +72,9 @@ export async function sendDingTalk(
   config: DingTalkChannelConfig,
   payload: AlertNotification,
 ): Promise<void> {
+  assertSafeChannelUrl(config.url, {
+    ...(config.allowPrivateNetwork ? { allowPrivateNetwork: true } : {}),
+  });
   const url = config.secret ? signRequest(config.url, config.secret) : config.url;
   const { title, text } = renderMarkdown(payload);
   const body: Record<string, unknown> = {
@@ -94,16 +98,30 @@ export async function sendDingTalk(
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`dingtalk ${config.url} responded ${res.status}`);
+      const err = new Error(`dingtalk ${config.url} responded ${res.status}`) as Error & {
+        code: string;
+        httpStatus: number;
+      };
+      err.code = "DINGTALK_HTTP_ERROR";
+      err.httpStatus = res.status;
+      throw err;
     }
     // DingTalk returns 200 even on logical failures (e.g. keyword missing).
     // The body has { errcode, errmsg }; surface non-zero errcode as a thrown
-    // error so the dispatcher records the failure in alert history.
+    // error so the dispatcher records the failure in alert history. The
+    // `code` field is the DingTalk errcode (number-as-string) so callers
+    // can match specific failure shapes — `310000` for signature
+    // mismatch, `300001` for missing keyword, etc.
     const data = (await res.json().catch(() => undefined)) as
       | { errcode?: number; errmsg?: string }
       | undefined;
     if (data && typeof data.errcode === "number" && data.errcode !== 0) {
-      throw new Error(`dingtalk errcode=${data.errcode} errmsg=${data.errmsg ?? ""}`);
+      const err = new Error(
+        `dingtalk errcode=${data.errcode} errmsg=${data.errmsg ?? ""}`,
+      ) as Error & { code: string; dingTalkErrCode: number };
+      err.code = "DINGTALK_API_ERROR";
+      err.dingTalkErrCode = data.errcode;
+      throw err;
     }
   } finally {
     clearTimeout(timer);

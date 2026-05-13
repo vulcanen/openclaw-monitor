@@ -6,6 +6,7 @@ export const zh = {
   "nav.models": "模型",
   "nav.tools": "工具",
   "nav.runs": "运行",
+  "nav.sessions": "会话",
   "nav.conversations": "对话",
   "nav.logs": "日志",
   "nav.alerts": "告警",
@@ -14,7 +15,9 @@ export const zh = {
 
   // Insights (v0.9.0+)
   "insights.title": "诊断 / Top-N",
-  "insights.subtitle": "把统计指标变成可下钻的个案 — 最慢 / 最贵 / 最易错 / 最不稳的入口直接列出 + 跳转 Run Detail。",
+  "insights.subtitle":
+    "把统计指标变成可下钻的个案 — 最慢 / 最贵 / 最易错 / 最不稳的入口直接列出 + 跳转 Run Detail。",
+  "insights.subtitleGlobal": "把统计指标变成可下钻的个案。时间窗跟随顶部全局选择器。",
   "insights.window.label": "时间窗",
   "insights.window.15m": "近 15 分钟",
   "insights.window.1h": "近 1 小时",
@@ -68,7 +71,9 @@ export const zh = {
 
   // Costs (v0.8.0+)
   "costs.title": "成本 / Token 经济学",
-  "costs.subtitle": "货币：{currency} · 数据来自 llm_output hook，依赖 audit 安全门。更新时间：{time}",
+  "costs.subtitle":
+    "货币：{currency} · 数据来自 llm_output hook，依赖 audit 安全门。更新时间：{time}",
+  "costs.range.window": "{window} 内成本",
   "costs.range.today": "今日 (UTC)",
   "costs.range.thisWeek": "本周 (UTC, 周一起)",
   "costs.range.thisMonth": "本月 (UTC, 1 号起)",
@@ -90,10 +95,15 @@ export const zh = {
   "costs.notice.noPricing": "已记录 token，但价格表为空，成本全部为 0",
   "costs.notice.noPricingHint":
     "在 ~/.openclaw/openclaw.json 的 plugins.entries.openclaw-monitor.config.pricing.models 里加你用到的 provider/model 价格 (per 1k tokens)，重启 gateway 后会生效。",
-  "costs.notice.noTokens": "Token 数据为 0：请先在 model 配置加 compat.supportsUsageInStreaming: true",
+  "costs.notice.noTokens": "Token 数据为 0：按可能性从高到低逐项排查",
+  "costs.notice.noTokensHint.gate":
+    "Host 安全门未开 — llm_output hook 受 plugins.entries.openclaw-monitor.hooks.allowConversationAccess 控制，关闭时 host 静默不 fire 该 hook，token / cost 永远是 0。修复：在 OpenClaw 主机执行 `openclaw monitor setup --audit` 并重启 gateway。",
+  "costs.notice.noTokensHint.compat":
+    '上游流式 usage 被 host 丢弃 — 对未知 baseUrl 的 OpenAI-compat provider，host 默认 compat.supportsUsageInStreaming=false（host: src/plugins/provider-model-compat.ts），即便上游返回 usage 帧也不上报。修复：在 ~/.openclaw/openclaw.json 的 models.providers.<id>.models[*] 里加 "compat": { "supportsUsageInStreaming": true } 后重启 gateway。',
+  "costs.notice.noTokensHint.adapter":
+    "Provider adapter 不 fire llm_output — 极少数自定义 / 非标准 adapter 完全跳过该 hook。修复路径较深：查 host 日志该 model.call 是否走通了 llm_output 路径，或先用 curl 直连上游 + stream_options.include_usage:true 验证上游是否真的返回 usage。",
   "costs.notice.noTokensHint":
-    "OpenClaw host 对未知 baseUrl 的 OpenAI-compat provider 默认认为不支持流式 usage（host: src/plugins/provider-model-compat.ts），会丢弃上游返回的 usage 帧。修复：在 ~/.openclaw/openclaw.json 的 models.providers.<id>.models[*] 里加 \"compat\": { \"supportsUsageInStreaming\": true } 后重启 gateway。详见 README 的「自建 LLM 上游的已知配置注意点」。如果加了仍为 0，再排查上游是否真的返回 usage（curl 直连上游 + stream_options.include_usage:true 验证）。",
-
+    "OpenClaw host 对未知 baseUrl 的 OpenAI-compat provider 默认认为不支持流式 usage，会丢弃上游返回的 usage 帧。详见 README。",
 
   // Alerts (v0.7.0+)
   "alerts.title": "告警",
@@ -114,6 +124,7 @@ export const zh = {
   "alerts.col.name": "名称",
   "alerts.col.severity": "严重度",
   "alerts.col.rule": "规则",
+  "alerts.col.ruleExpr": "规则表达式",
   "alerts.col.channels": "通道",
   "alerts.col.status": "状态",
   "alerts.col.value": "当前值",
@@ -125,6 +136,26 @@ export const zh = {
   "alerts.status.firing": "触发中",
   "alerts.status.ok": "正常",
 
+  // Sessions (v0.9.7)
+  "sessions.title": "会话生命周期",
+  "sessions.subtitle":
+    "由 session.lifecycle.* 合成事件派生 · 当前活跃 {active} 个 · 共 {total} 条记录",
+  "sessions.filter.status": "状态过滤",
+  "sessions.status.active": "活跃",
+  "sessions.status.processing": "处理中",
+  "sessions.status.idle": "空闲",
+  "sessions.status.ended": "已结束",
+  "sessions.col.sessionKey": "session key",
+  "sessions.col.status": "状态",
+  "sessions.col.started": "开始时间",
+  "sessions.col.ended": "结束时间",
+  "sessions.col.duration": "时长",
+  "sessions.col.reason": "结束原因",
+  "sessions.col.messages": "消息数",
+  "sessions.empty": "暂无会话活动",
+  "sessions.emptyHint":
+    "会话数据由 session.state 事件派生（每条消息 idle↔processing 切换都会 fire）。如果空白，确认 gateway 是否处理过任何消息流量；session.lifecycle.* 是 v0.9.6 新订阅，仅在 agent harness 显式创建/销毁 session 时 fire，多数对话流程不会触发，仅作为辅助标记。",
+
   // Sources
   "sources.title": "来源",
   "sources.subtitle": "按入口路径分类的流量统计（OpenAI API、Control UI、各 channel 插件）",
@@ -135,13 +166,43 @@ export const zh = {
   "sources.legend.meaning": "含义",
   "sources.legend.openaiApi": "OpenAI 兼容 API（/v1/chat/completions），调用方多为外部项目",
   "sources.legend.controlUi": "OpenClaw 内置 Control UI 聊天",
-  "sources.legend.channelPlugin": "channel 插件入口（如 telegram / discord / feishu），<name> 为具体通道名",
+  "sources.legend.channelPlugin":
+    "channel 插件入口（如 telegram / discord / feishu），<name> 为具体通道名",
 
   // Top bar status / actions
   "status.idle": "空闲",
   "status.live": "实时 · 已采集 {count} 条事件",
   "action.signOut": "退出",
   "action.langSwitch": "EN",
+
+  // Global time-window selector (v0.9.7)
+  "topbar.window": "时间窗",
+  "topbar.window.1m": "近 1 分钟",
+  "topbar.window.5m": "近 5 分钟",
+  "topbar.window.15m": "近 15 分钟",
+  "topbar.window.1h": "近 1 小时",
+  "topbar.window.6h": "近 6 小时",
+  "topbar.window.24h": "近 24 小时",
+  "topbar.alertsFiring": "{count} 条告警触发中",
+
+  // Overview health banner (v0.9.7)
+  "overview.health.label": "状态",
+  "overview.health.ok": "系统正常",
+  "overview.health.warn": "有 {count} 项需要关注",
+  "overview.health.error": "事件：{count} 项异常",
+  "overview.health.detailCalm": "1m 窗口无错误 · 15m 窗口无 session 告警",
+  "overview.health.detailIssues":
+    "5m 错误率 {errorRate}% · {sessionsAlerted} 个 session 卡死 · {recentErrors} 条最近错误",
+  "overview.section.topSources": "今日 Top 入口来源",
+  "overview.section.topSourcesSub": "按调用量排序的前 5 个 entry path",
+  "overview.lifecycle.activeSessions": "活跃 session",
+  "overview.lifecycle.compactionsToday": "今日压缩次数",
+  "overview.lifecycle.lastRestart": "上次 gateway 启动",
+  "overview.lifecycle.toolPersists": "工具结果落盘 (1h)",
+  "overview.lifecycle.never": "尚未捕获",
+  "overview.lifecycle.relativeMin": "{n} 分钟前",
+  "overview.lifecycle.relativeHour": "{n} 小时前",
+  "overview.lifecycle.relativeDay": "{n} 天前",
 
   // Token gate
   "tokenGate.title": "OpenClaw Monitor",
@@ -167,20 +228,39 @@ export const zh = {
   "empty.errors": "暂无错误记录",
   "empty.dataYet": "暂未采集到数据",
   "empty.logs": "暂未缓冲日志记录",
+  "empty.logs.hint.filter": "过滤条件可能过严：尝试清空 level / component / 事件类型选择。",
+  "empty.logs.hint.warmup": "gateway 启动后需要几秒才能填满事件 ring，刷新一次再看。",
+  "empty.logs.hint.noTraffic":
+    "如果都正常但依然空，确认 gateway 在处理流量（curl /v1/chat/completions 或开一个 channel 会话）。",
   "empty.runs": "没有匹配的运行",
-  "empty.history": "(未捕获到 history)",
-  "empty.input": "(无输入)",
-  "empty.output": "(无输出)",
+  "empty.runs.hint.filter": '状态过滤可能过严：选 "全部" 看完整运行列表。',
+  "empty.runs.hint.retention":
+    "runs 文件保留默认 30 天，retention 删除后看不到历史运行 — 在 retention.runsDays 调大。",
+  "empty.runs.hint.noTraffic":
+    "确认 agent harness 真的跑过（不是 Control UI 直接聊天 — 那不会建 run 记录）。",
 
   // Stat & chart labels
   "stat.modelCalls1m": "模型调用 (1m)",
   "stat.errorRate5m": "错误率 (5m)",
   "stat.modelP955m": "模型 P95 (5m)",
   "stat.sessionAlerts15m": "会话告警 (15m)",
+  // Window-aware variants (v0.9.7.1) — the cards above are kept for
+  // any caller still passing hardcoded windows; new Overview uses these.
+  "stat.modelCallsWindow": "模型调用 ({window})",
+  "stat.errorRateWindow": "错误率 ({window})",
+  "stat.modelP95Window": "模型 P95 ({window})",
+  "stat.sessionAlertsWindow": "会话告警 ({window})",
   "stat.errors": "{count} 个错误",
   "stat.errorRateDetail": "{errors}/{total}",
   "stat.latency": "延迟",
   "chart.eventsLast15m": "事件 / 10s · 近 15m",
+  "chart.events": "{metric} / 10s · {window}",
+  "chart.eventsCapped": "{metric} / 10s · 上限 1h（{window} 超出 series ring 容量）",
+  "chart.metric.events": "事件",
+  "chart.metric.modelCalls": "模型调用",
+  "chart.metric.modelErrors": "模型错误",
+  "chart.metric.toolExecs": "工具执行",
+  "chart.metric.toolErrors": "工具错误+阻塞",
   "chart.modelCallsLast15m": "模型调用 / 10s · 近 15m",
   "chart.modelErrorsLast15m": "模型错误 / 10s · 近 15m",
   "chart.toolExecsLast15m": "工具执行 / 10s · 近 15m",
@@ -199,11 +279,12 @@ export const zh = {
 
   // Channels
   "channels.title": "通道",
-  "channels.subtitle": "host 设的 channel 字段聚合（OpenClaw 把所有内部入口都标为 webchat — 看「来源」页可看到 OpenAI API / Control UI 等更细的拆分）",
+  "channels.subtitle":
+    "host 设的 channel 字段聚合（OpenClaw 把所有内部入口都标为 webchat — 看「来源」页可看到 OpenAI API / Control UI 等更细的拆分）",
   "channels.rollup": "通道维度统计",
   "channels.chartTitle": "近 15m 模型调用趋势",
   "channels.hostHint":
-    "OpenClaw 的 INTERNAL_MESSAGE_CHANNEL 常量是 \"webchat\"，覆盖 /v1/chat/completions、Control UI、heartbeat / cron 等所有非 channel-plugin 入口。要按入口路径拆分请看「来源」页。",
+    'OpenClaw 的 INTERNAL_MESSAGE_CHANNEL 常量是 "webchat"，覆盖 /v1/chat/completions、Control UI、heartbeat / cron 等所有非 channel-plugin 入口。要按入口路径拆分请看「来源」页。',
 
   // Models
   "models.title": "模型",
@@ -265,6 +346,7 @@ export const zh = {
   "logs.filter.level": "级别",
   "logs.filter.component": "组件",
   "logs.filter.componentPlaceholder": "如 gateway",
+  "logs.filter.typePrefix": "事件类型",
   "logs.col.time": "时间",
   "logs.col.level": "级别",
   "logs.col.component": "组件",
@@ -272,8 +354,10 @@ export const zh = {
 
   // Conversations list (M5)
   "conversations.title": "对话审计",
-  "conversations.subtitle":
-    "完整对话内容审计 · {active} 个进行中 · 点 runId 进入详情",
+  "conversations.subtitle": "完整对话内容审计 · {active} 个进行中 · 点 runId 进入详情",
+  "conversations.filter.status": "状态过滤",
+  "conversations.filter.errorsOnly": "仅失败",
+  "conversations.filter.okOnly": "仅成功",
   "conversations.empty": "暂未捕获到对话",
   "conversations.emptyHint":
     "OpenAI API、channel 插件的对话会带完整 LLM 内容；Control UI 等内部路径只能记录会话维度信息（无原文）。",
@@ -293,6 +377,7 @@ export const zh = {
 
   // Conversation detail (M5)
   "conversationDetail.title": "对话 {runId}",
+  "conversationDetail.titleShort": "对话详情",
   "conversationDetail.backToList": "← 返回对话列表",
   "conversationDetail.summary": "概要",
   "conversationDetail.row.status": "状态",
@@ -301,25 +386,32 @@ export const zh = {
   "conversationDetail.row.ended": "结束",
   "conversationDetail.row.durationMs": "耗时 (ms)",
   "conversationDetail.row.llmHops": "LLM 跳数",
-  "conversationDetail.section.inbound": "① 项目 → OpenClaw",
-  "conversationDetail.section.llmInput": "② OpenClaw → LLM",
-  "conversationDetail.section.llmInputHop": "② OpenClaw → LLM (第 {n} 跳)",
-  "conversationDetail.section.llmOutput": "③ LLM → OpenClaw",
-  "conversationDetail.section.llmOutputHop": "③ LLM → OpenClaw (第 {n} 跳)",
-  "conversationDetail.section.outbound": "④ OpenClaw → 项目",
-  "conversationDetail.label.prompt": "prompt",
-  "conversationDetail.label.system": "system",
   "conversationDetail.label.history": "session history ({count})",
   "conversationDetail.label.historyShort": "history ({count})",
   "conversationDetail.label.historyShowing": "显示 {shown} / {total} 条消息",
   "conversationDetail.label.assistantText": "assistant 文本 {n}",
   "conversationDetail.label.images": "{count} 张图片",
-  "conversationDetail.label.tokens": "输入 {input} / 输出 {output}",
-  "conversationDetail.empty.inbound":
-    "(未捕获到入站 · 该 run 没触发 before_prompt_build hook)",
-  "conversationDetail.empty.exchange": "(未捕获到 llm_input / llm_output)",
-  "conversationDetail.empty.outbound": "(未捕获到出站 · 该 run 没触发 agent_end hook — 可能被中断或超时)",
   "conversationDetail.row.success": "成功",
+
+  // Timeline cards (v0.9.5)
+  "conversationDetail.timeline.empty": "未捕获到任何对话事件",
+  "conversationDetail.timeline.inbound": "入站",
+  "conversationDetail.timeline.inboundSub": "消息发送方 → OpenClaw",
+  "conversationDetail.timeline.llmHop": "LLM 调用",
+  "conversationDetail.timeline.llmHopN": "LLM 调用 · 第 {n} / {total} 跳",
+  "conversationDetail.timeline.outbound": "出站",
+  "conversationDetail.timeline.outboundOk": "成功",
+  "conversationDetail.timeline.outboundFail": "失败",
+  "conversationDetail.timeline.outboundEmpty": "(出站载荷为空)",
+  "conversationDetail.timeline.error": "错误",
+  "conversationDetail.timeline.systemPrompt": "system prompt",
+  "conversationDetail.timeline.userPrompt": "prompt",
+  "conversationDetail.timeline.assistantReply": "assistant 回复",
+  "conversationDetail.timeline.tokens": "输入 {input} · 输出 {output}",
+  "conversationDetail.timeline.noInput": "(该跳未捕获到输入)",
+  "conversationDetail.timeline.noOutput": "未捕获到本跳的 LLM 输出",
+  "conversationDetail.timeline.noOutputHint":
+    "若持续无输出，常见原因：① host 端 `hooks.allowConversationAccess` 未开启（运行 `openclaw monitor setup --audit`）；② 上游 LLM 流式响应未返回 usage / 文本（OpenAI 兼容网关需要 `compat.supportsUsageInStreaming: true`）；③ provider 适配器未触发 `llm_output` hook（检查 host 日志）。",
 
   // Time series chart
   "chart.noData": "暂无数据",

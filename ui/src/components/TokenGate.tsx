@@ -22,10 +22,7 @@ export function TokenGate({ children }: { children: ReactNode }) {
     <div className="token-gate">
       <div className="token-gate-card">
         <div className="token-gate-lang">
-          <button
-            className="lang"
-            onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
-          >
+          <button className="lang" onClick={() => setLocale(locale === "zh" ? "en" : "zh")}>
             {t("action.langSwitch")}
           </button>
         </div>
@@ -36,7 +33,7 @@ export function TokenGate({ children }: { children: ReactNode }) {
           aria-labelledby="token-gate-title"
           onSubmit={(e) => {
             e.preventDefault();
-            const form = e.currentTarget as HTMLFormElement;
+            const form = e.currentTarget;
             const input = form.elements.namedItem("token") as HTMLInputElement | null;
             const value = input?.value.trim() ?? "";
             if (!value) {

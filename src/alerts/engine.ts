@@ -67,6 +67,13 @@ export function createAlertEngine(params: {
    */
   const activeByRuleId = new Map<string, ActiveAlert>();
   let timer: NodeJS.Timeout | undefined;
+  // Reentrancy guard: setInterval does NOT skip a tick when the previous
+  // callback's promise is still pending. With many rules × many channels ×
+  // 10s per-channel timeout a single evaluation can exceed
+  // `evaluationIntervalSec`, and two ticks would otherwise race over the
+  // shared `activeByRuleId` Map — both seeing `previous=undefined` and both
+  // sending "fired" notifications. Skip overlapping ticks instead.
+  let evaluating = false;
 
   const evaluate = async (): Promise<void> => {
     if (!config.enabled) return;
@@ -77,8 +84,7 @@ export function createAlertEngine(params: {
 
     for (const rule of config.rules) {
       const value = readMetric(windows, rule);
-      const isFiring =
-        value !== null && compare(value, rule.op, rule.threshold);
+      const isFiring = value !== null && compare(value, rule.op, rule.threshold);
       const previous = activeByRuleId.get(rule.id);
       const severity = rule.severity ?? DEFAULT_SEVERITY;
       const cooldownMs = (rule.cooldownSec ?? DEFAULT_COOLDOWN_SEC) * 1000;
@@ -205,9 +211,15 @@ export function createAlertEngine(params: {
       if (timer) return;
       const intervalMs = Math.max(5, config.evaluationIntervalSec) * 1000;
       timer = setInterval(() => {
-        evaluate().catch((err) => {
-          params.logger?.warn?.(`[alerts] evaluate failed: ${String(err)}`);
-        });
+        if (evaluating) return; // previous tick still running — skip
+        evaluating = true;
+        evaluate()
+          .catch((err) => {
+            params.logger?.warn?.(`[alerts] evaluate failed: ${String(err)}`);
+          })
+          .finally(() => {
+            evaluating = false;
+          });
       }, intervalMs);
       timer.unref?.();
       params.logger?.info?.(
@@ -222,7 +234,19 @@ export function createAlertEngine(params: {
       return timer !== undefined;
     },
     async evaluateNow() {
-      await evaluate();
+      // Same reentrancy guard as the setInterval path. evaluateNow is
+      // called by tests today and a future "manual fire" REST endpoint
+      // tomorrow; either could race with an in-flight scheduled tick and
+      // both would see `previous=undefined`, double-sending "fired"
+      // notifications past cooldown. Skip when the engine is already
+      // mid-evaluation.
+      if (evaluating) return;
+      evaluating = true;
+      try {
+        await evaluate();
+      } finally {
+        evaluating = false;
+      }
     },
     active() {
       return Array.from(activeByRuleId.values());

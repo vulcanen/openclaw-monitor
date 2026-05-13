@@ -1,0 +1,74 @@
+name: Auto-close failing Dependabot PRs
+
+# Listens to the main CI workflow's completion. When CI fails on a PR
+# opened by dependabot[bot] (and only dependabot — never a human PR),
+# we close the PR with a comment instead of leaving it sitting in the
+# review queue. Dependabot will re-evaluate the same update on its
+# next schedule, so closing is reversible: if the upstream releases a
+# fix you'll see a new PR automatically next Monday.
+#
+# Why this isn't aggressive: dependabot PRs are auto-generated. A
+# failing CI run on a dependency bump means we'd need manual config
+# migration anyway — letting it accumulate just creates noise. Closing
+# is a clear signal "this update isn't safe to apply as-is".
+#
+# Safety guards:
+#   - actor check rejects anything not from dependabot[bot]
+#   - we only react to the explicit "CI" workflow (not other actions)
+#   - we don't delete the branch here; that's repo-level setting
+#     (Settings → General → Automatically delete head branches), which
+#     covers both dependabot and human PRs in one switch.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  close-on-failure:
+    # Only react when CI failed AND the upstream workflow was triggered
+    # by a dependabot PR. The actor on workflow_run is the user who
+    # caused the original run; for dependabot PRs that's dependabot[bot].
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const prs = context.payload.workflow_run.pull_requests || [];
+            if (prs.length === 0) {
+              core.info('workflow_run has no associated PR; nothing to close.');
+              return;
+            }
+            for (const pr of prs) {
+              core.info(`Closing PR #${pr.number} — CI verify failed (run ${context.payload.workflow_run.html_url})`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: [
+                  '🤖 **Auto-closed by Dependabot CI gate.**',
+                  '',
+                  `The latest CI run on this PR failed: ${context.payload.workflow_run.html_url}`,
+                  '',
+                  'For Dependabot updates we close failing PRs automatically — they almost always need manual config migration that the bot can\'t do on its own (e.g. peer-plugin upgrades for a major bump).',
+                  '',
+                  'If you want to take this update manually, comment `@dependabot reopen` and finish the migration locally before merging. If the upstream release was buggy and a follow-up patch is out, Dependabot will open a new PR on its next schedule.',
+                ].join('\n'),
+              });
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                state: 'closed',
+              });
+            }

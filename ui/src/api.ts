@@ -8,6 +8,50 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/**
+ * Typed error for non-401 fetch failures. Previously every non-OK response
+ * threw a raw `Error` with `${status} ${statusText}: ${body}`, and the body
+ * is sometimes a multi-line stack from the gateway — that string ended up
+ * rendered verbatim in the `error-banner` UI which looks terrible. Now
+ * callers can branch on status / treat 5xx as transient, and the UI can
+ * pick a short, friendly summary while keeping the raw body available
+ * for "show details" toggles.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly bodyText: string;
+  /** True when the error is plausibly retryable (5xx, 408, 429). The UI
+   *  uses this to decide whether to show a "Retry" action without
+   *  hardcoding HTTP status lists in components. */
+  readonly retryable: boolean;
+  constructor(status: number, statusText: string, bodyText: string) {
+    const short =
+      bodyText.length > 0 && bodyText.length < 120
+        ? `${status} ${statusText}: ${bodyText}`
+        : `${status} ${statusText}`;
+    super(short);
+    this.name = "ApiError";
+    this.status = status;
+    this.statusText = statusText;
+    this.bodyText = bodyText;
+    this.retryable = status >= 500 || status === 408 || status === 429;
+  }
+  /** Short human-readable label suitable for an error banner. */
+  friendly(): string {
+    if (this.status === 0) return "Network error — gateway unreachable";
+    if (this.status >= 500) return `Gateway error (${this.status})`;
+    if (this.status === 429) return "Rate limited by gateway";
+    if (this.status === 404) return "Not found";
+    if (this.status === 400) {
+      return this.bodyText.length > 0 && this.bodyText.length < 160
+        ? `Bad request: ${this.bodyText}`
+        : "Bad request";
+    }
+    return `Request failed (${this.status})`;
+  }
+}
+
 export const tokenStore = {
   get(): string | undefined {
     try {
@@ -205,15 +249,24 @@ export type ConversationRecord = {
 };
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    headers: { Accept: "application/json", ...authHeaders() },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      headers: { Accept: "application/json", ...authHeaders() },
+    });
+  } catch {
+    // Total network failure (gateway down, DNS, CORS preflight rejected,
+    // browser offline). Surface as a retryable ApiError so usePolling can
+    // show "gateway unreachable" instead of a stack trace.
+    throw new ApiError(0, "network_error", "");
+  }
   if (response.status === 401) {
     notifyUnauthorized();
     throw new UnauthorizedError();
   }
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+    const body = await response.text().catch(() => "");
+    throw new ApiError(response.status, response.statusText, body);
   }
   return (await response.json()) as T;
 }
@@ -224,17 +277,24 @@ export const api = {
   models: () => getJson<{ rows: DimensionRow[] }>("/models"),
   tools: () => getJson<{ rows: DimensionRow[] }>("/tools"),
   sources: () => getJson<{ rows: DimensionRow[] }>("/sources"),
-  runs: (limit = 50) =>
-    getJson<{ active: number; runs: RunSnapshot[] }>(`/runs?limit=${limit}`),
+  runs: (limit = 50) => getJson<{ active: number; runs: RunSnapshot[] }>(`/runs?limit=${limit}`),
   runDetail: (runId: string) =>
     getJson<{
       run: RunSnapshot;
       events: Array<{ type: string; capturedAt: string; payload: unknown }>;
     }>(`/runs/${encodeURIComponent(runId)}`),
-  logs: (params: { level?: string; component?: string; limit?: number } = {}) => {
+  logs: (
+    params: {
+      level?: string;
+      component?: string;
+      limit?: number;
+      typePrefix?: string;
+    } = {},
+  ) => {
     const search = new URLSearchParams();
     if (params.level) search.set("level", params.level);
     if (params.component) search.set("component", params.component);
+    if (params.typePrefix) search.set("typePrefix", params.typePrefix);
     if (params.limit) search.set("limit", String(params.limit));
     const qs = search.toString();
     return getJson<{ records: LogRecord[] }>(`/logs${qs ? `?${qs}` : ""}`);
@@ -250,25 +310,29 @@ export const api = {
       events: Array<{ type: string; capturedAt: string; payload: unknown }>;
     }>(`/events${qs ? `?${qs}` : ""}`);
   },
-  conversations: (limit = 50) =>
-    getJson<{ active: number; conversations: ConversationSummary[] }>(
-      `/conversations?limit=${limit}`,
-    ),
-  conversationsBySession: (limit = 50) =>
-    getJson<{ active: number; groupBy: "sessionKey"; sessions: SessionGroup[] }>(
-      `/conversations?limit=${limit}&groupBy=sessionKey`,
-    ),
+  conversations: (limit = 50, params: { hasError?: boolean } = {}) => {
+    const search = new URLSearchParams({ limit: String(limit) });
+    if (params.hasError !== undefined) search.set("hasError", String(params.hasError));
+    return getJson<{ active: number; conversations: ConversationSummary[] }>(
+      `/conversations?${search.toString()}`,
+    );
+  },
+  conversationsBySession: (limit = 50, params: { hasError?: boolean } = {}) => {
+    const search = new URLSearchParams({
+      limit: String(limit),
+      groupBy: "sessionKey",
+    });
+    if (params.hasError !== undefined) search.set("hasError", String(params.hasError));
+    return getJson<{ active: number; groupBy: "sessionKey"; sessions: SessionGroup[] }>(
+      `/conversations?${search.toString()}`,
+    );
+  },
   conversationDetail: (runId: string) =>
-    getJson<{ conversation: ConversationRecord }>(
-      `/conversations/${encodeURIComponent(runId)}`,
-    ),
-  alertsRules: () =>
-    getJson<{ running: boolean; rules: AlertRule[] }>("/alerts/rules"),
+    getJson<{ conversation: ConversationRecord }>(`/conversations/${encodeURIComponent(runId)}`),
+  alertsRules: () => getJson<{ running: boolean; rules: AlertRule[] }>("/alerts/rules"),
   alertsActive: () => getJson<{ active: ActiveAlert[] }>("/alerts/active"),
   alertsHistory: (limit = 100) =>
-    getJson<{ count: number; entries: AlertHistoryEntry[] }>(
-      `/alerts/history?limit=${limit}`,
-    ),
+    getJson<{ count: number; entries: AlertHistoryEntry[] }>(`/alerts/history?limit=${limit}`),
   costs: () => getJson<CostSnapshot>("/costs"),
   insightsSlowCalls: (windowSec: number, limit: number) =>
     getJson<{ windowSec: number; rows: SlowCallRow[] }>(
@@ -297,6 +361,7 @@ export type SlowCallRow = {
   callId?: string;
   sessionKey?: string;
   channel?: string;
+  trigger?: string;
   responseStreamBytes?: number;
 };
 

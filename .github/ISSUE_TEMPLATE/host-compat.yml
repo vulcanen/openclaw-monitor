@@ -1,0 +1,41 @@
+name: Host compatibility issue
+description: Plugin breaks on a new OpenClaw host version due to renamed / removed hooks or fields.
+title: "[host-compat] "
+labels: ["host-compat"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every OpenClaw release can rename hooks or change event shapes. PRs that re-align the probe layer are always welcome — feel free to skip the issue and open a PR directly.
+  - type: input
+    id: host-old
+    attributes:
+      label: Last known good host version
+      placeholder: e.g. 2026.5.7
+    validations:
+      required: true
+  - type: input
+    id: host-new
+    attributes:
+      label: Host version that broke
+      placeholder: e.g. 2026.6.0
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Suspected upstream change
+      description: |
+        If you've already located the host commit / SDK file that changed, link it. Otherwise describe the symptom: which dashboard page / metric / hook stopped working.
+      placeholder: |
+        - host file: src/plugins/hook-types.ts
+        - field renamed: PluginHookLlmOutputEvent.usage.input → usage.inputTokens
+        - plugin file affected: src/probes/hook-metrics.ts L184-220
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround (if any)
+      description: |
+        Stay on old host? Pin plugin version? Manual config? — share whatever's keeping you running while the fix lands.

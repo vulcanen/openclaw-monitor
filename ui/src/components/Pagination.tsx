@@ -73,9 +73,9 @@ export function Pagination({
       ) : null}
       <button
         type="button"
+        className="pager-button"
         disabled={safePage === 0}
         onClick={() => onPageChange(safePage - 1)}
-        style={pagerButton(safePage === 0)}
       >
         {t("pagination.prev")}
       </button>
@@ -84,26 +84,12 @@ export function Pagination({
       </span>
       <button
         type="button"
+        className="pager-button"
         disabled={safePage >= pageCount - 1}
         onClick={() => onPageChange(safePage + 1)}
-        style={pagerButton(safePage >= pageCount - 1)}
       >
         {t("pagination.next")}
       </button>
     </div>
   );
-}
-
-function pagerButton(disabled: boolean): React.CSSProperties {
-  return {
-    background: "var(--panel-2)",
-    border: "1px solid var(--border)",
-    color: disabled ? "var(--text-dim)" : "var(--text)",
-    padding: "4px 10px",
-    borderRadius: 4,
-    cursor: disabled ? "not-allowed" : "pointer",
-    fontFamily: "var(--font)",
-    fontSize: 12,
-    opacity: disabled ? 0.5 : 1,
-  };
 }

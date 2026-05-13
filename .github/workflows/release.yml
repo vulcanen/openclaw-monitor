@@ -1,0 +1,70 @@
+name: Release
+
+# Fires when a `vX.Y.Z` tag is pushed. The job:
+#   1. Verifies CI gates (lint, typecheck, tests, build) on Node 22 and 24
+#      — same matrix as ci.yml, so we never publish something that wouldn't
+#      have passed PR review.
+#   2. Cuts a GitHub Release with auto-generated notes from the commit log
+#      since the previous tag. Manual edits afterwards (curated highlights,
+#      breaking-change call-outs) are encouraged.
+#
+# Publishing to npm is a separate manual step done by the maintainer with
+# `npm publish` — we intentionally don't wire NPM_TOKEN into CI to keep
+# the supply-chain attack surface minimal.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: ui
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run typecheck
+        working-directory: ui
+      - run: npm test
+      - run: npm run build
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need full history for release-notes generation
+          fetch-depth: 0
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --generate-notes asks GitHub to compose release notes from the
+          # commit log between this tag and the previous one. We use the
+          # commit subjects directly as the canonical changelog (see
+          # CONTRIBUTING.md commit style: "feat(vX.Y.Z): ...").
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag

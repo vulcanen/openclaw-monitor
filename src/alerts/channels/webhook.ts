@@ -1,4 +1,5 @@
 import type { AlertNotification, WebhookChannelConfig } from "../types.js";
+import { assertSafeChannelUrl } from "./url-guard.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -14,6 +15,9 @@ export async function sendWebhook(
   config: WebhookChannelConfig,
   payload: AlertNotification,
 ): Promise<void> {
+  assertSafeChannelUrl(config.url, {
+    ...(config.allowPrivateNetwork ? { allowPrivateNetwork: true } : {}),
+  });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   try {
@@ -27,7 +31,13 @@ export async function sendWebhook(
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`webhook ${config.url} responded ${res.status}`);
+      const err = new Error(`webhook ${config.url} responded ${res.status}`) as Error & {
+        code: string;
+        httpStatus: number;
+      };
+      err.code = "WEBHOOK_HTTP_ERROR";
+      err.httpStatus = res.status;
+      throw err;
     }
   } finally {
     clearTimeout(timer);

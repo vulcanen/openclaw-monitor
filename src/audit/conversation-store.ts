@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { summarizeConversation } from "./summarize.js";
 import type { ConversationRecord, ConversationSummary } from "./types.js";
 
 const FILE_RE = /^conversations-(\d{4}-\d{2}-\d{2})\.jsonl$/u;
@@ -48,48 +49,64 @@ function listFiles(dir: string): Array<{ file: string; day: string }> {
   return out.sort((a, b) => a.day.localeCompare(b.day));
 }
 
-function summarize(record: ConversationRecord): ConversationSummary {
-  let totalIn = 0;
-  let totalOut = 0;
-  for (const out of record.llmOutputs) {
-    totalIn += out.usage?.input ?? 0;
-    totalOut += out.usage?.output ?? 0;
-  }
-  const lastOutput = record.llmOutputs[record.llmOutputs.length - 1];
-  const responseText = lastOutput?.assistantTexts.join(" ").slice(0, 160);
-  return {
-    runId: record.runId,
-    ...(record.sessionId !== undefined ? { sessionId: record.sessionId } : {}),
-    // sessionKey is load-bearing for the Conversations page's
-    // groupBy=sessionKey path. Without it the UI groups every
-    // persisted record under the "_ungrouped" bucket. Mirror the same
-    // forwarding that conversation-routes.ts:summarizeRuntime does for
-    // in-memory records.
-    ...(record.sessionKey !== undefined ? { sessionKey: record.sessionKey } : {}),
-    ...(record.channelId !== undefined ? { channelId: record.channelId } : {}),
-    ...(record.trigger !== undefined ? { trigger: record.trigger } : {}),
-    status: record.status,
-    startedAt: record.startedAt,
-    ...(record.endedAt !== undefined ? { endedAt: record.endedAt } : {}),
-    ...(record.durationMs !== undefined ? { durationMs: record.durationMs } : {}),
-    llmHops: record.llmInputs.length,
-    totalTokensIn: totalIn,
-    totalTokensOut: totalOut,
-    ...(record.inbound?.prompt
-      ? { promptPreview: record.inbound.prompt.slice(0, 160) }
-      : {}),
-    ...(responseText ? { responsePreview: responseText } : {}),
-    hasError: record.status === "error" || Boolean(record.errorMessage),
-  };
-}
-
 export function createConversationStore(rootDir: string): ConversationStore {
   ensureDir(rootDir);
+
+  // runId → file path index. Lets `get(runId)` skip the O(N×M) scan
+  // through every persisted file. Built lazily on first lookup, kept
+  // in memory after that, and updated incrementally by appendCompleted.
+  // We index *file*, not (file, byteOffset), because:
+  //   - records can have variable length (audit captures full prompts,
+  //     can be MB-scale per record) → byte offsets are fragile;
+  //   - a single-day file has at most a few hundred records in typical
+  //     deployments — re-scanning the matching day is fast enough;
+  //   - file-only indexes invalidate cleanly on retention prune.
+  let indexBuilt = false;
+  const runIdToFile = new Map<string, string>();
+  // Track which files are *known to be fully indexed* so a partial
+  // build (or a file that grew after indexing) can be re-scanned.
+  const fileMtimeAtIndex = new Map<string, number>();
+
+  const indexFile = (file: string): void => {
+    const lines = safeReadLines(file);
+    for (const line of lines) {
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line) as ConversationRecord;
+        if (typeof parsed.runId === "string") {
+          runIdToFile.set(parsed.runId, file);
+        }
+      } catch {
+        // skip corrupt
+      }
+    }
+    try {
+      fileMtimeAtIndex.set(file, fs.statSync(file).mtimeMs);
+    } catch {
+      // best-effort
+    }
+  };
+
+  const buildIndex = (): void => {
+    if (indexBuilt) return;
+    for (const { file } of listFiles(rootDir)) {
+      indexFile(file);
+    }
+    indexBuilt = true;
+  };
 
   const appendCompleted: ConversationStore["appendCompleted"] = (record) => {
     const day = dayStamp(record.endedAt ?? record.startedAt);
     const file = path.join(rootDir, `conversations-${day}.jsonl`);
     fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+    // Keep the index incrementally consistent so subsequent get(runId)
+    // calls hit the cache without rebuilding.
+    runIdToFile.set(record.runId, file);
+    try {
+      fileMtimeAtIndex.set(file, fs.statSync(file).mtimeMs);
+    } catch {
+      // best-effort
+    }
   };
 
   const list: ConversationStore["list"] = (params) => {
@@ -104,7 +121,7 @@ export function createConversationStore(rootDir: string): ConversationStore {
         try {
           const parsed = JSON.parse(line) as ConversationRecord;
           if (typeof parsed.runId !== "string") continue;
-          out.push(summarize(parsed));
+          out.push(summarizeConversation(parsed));
           if (out.length >= limit) return out;
         } catch {
           // skip corrupt
@@ -115,8 +132,11 @@ export function createConversationStore(rootDir: string): ConversationStore {
   };
 
   const get: ConversationStore["get"] = (runId) => {
-    const files = listFiles(rootDir).reverse();
-    for (const { file } of files) {
+    if (!indexBuilt) buildIndex();
+    const file = runIdToFile.get(runId);
+    if (file && fs.existsSync(file)) {
+      // Re-scan only the candidate file (records are appended in order
+      // and we don't know byte offset).
       const lines = safeReadLines(file);
       for (let index = lines.length - 1; index >= 0; index -= 1) {
         const line = lines[index];
@@ -126,6 +146,34 @@ export function createConversationStore(rootDir: string): ConversationStore {
           if (parsed.runId === runId) return parsed;
         } catch {
           // skip
+        }
+      }
+    }
+    // Index miss: either the runId never existed, or a file grew after
+    // index build (rare — appendCompleted updates the index). Fall back
+    // to a full scan once and refresh the index along the way.
+    for (const { file } of listFiles(rootDir).reverse()) {
+      const mtime = (() => {
+        try {
+          return fs.statSync(file).mtimeMs;
+        } catch {
+          return 0;
+        }
+      })();
+      if (fileMtimeAtIndex.get(file) === mtime) continue; // unchanged since indexed
+      indexFile(file);
+      const refound = runIdToFile.get(runId);
+      if (refound === file) {
+        const lines = safeReadLines(file);
+        for (let index = lines.length - 1; index >= 0; index -= 1) {
+          const line = lines[index];
+          if (!line) continue;
+          try {
+            const parsed = JSON.parse(line) as ConversationRecord;
+            if (parsed.runId === runId) return parsed;
+          } catch {
+            // skip
+          }
         }
       }
     }
@@ -140,6 +188,13 @@ export function createConversationStore(rootDir: string): ConversationStore {
         try {
           fs.unlinkSync(file);
           filesDeleted += 1;
+          fileMtimeAtIndex.delete(file);
+          // Cheap purge: walk the runId index and drop entries pointing
+          // at the just-deleted file. The index is bounded by the
+          // retention window, so this is small.
+          for (const [runId, indexedFile] of runIdToFile) {
+            if (indexedFile === file) runIdToFile.delete(runId);
+          }
         } catch {
           // best-effort
         }

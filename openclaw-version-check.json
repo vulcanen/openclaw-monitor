@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_description": "Tracks the periodic check of upstream OpenClaw stable releases. See CLAUDE.md decision #40. Updated by Claude every 48h.",
+  "currentBaselineVersion": "2026.5.7",
+  "checkIntervalHours": 48,
+  "lastCheckedAt": "2026-05-12T12:30:00Z",
+  "latestStableObserved": "v2026.5.7",
+  "latestStablePublishedAt": "2026-05-07T20:57:43Z",
+  "assessment": "no-action",
+  "assessmentNotes": "latest stable is v2026.5.7 — same as plugin baseline; no upstream changes to evaluate. (Beta channel has v2026.5.10-beta.* but pre-releases are explicitly ignored per the rule.)",
+  "releasesUrl": "https://github.com/openclaw/openclaw/releases",
+  "apiUrl": "https://api.github.com/repos/openclaw/openclaw/releases"
+}

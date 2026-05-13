@@ -1,8 +1,4 @@
-import type {
-  AlertChannelConfig,
-  AlertHistoryEntry,
-  AlertNotification,
-} from "./types.js";
+import type { AlertChannelConfig, AlertHistoryEntry, AlertNotification } from "./types.js";
 import { sendDingTalk } from "./channels/dingtalk.js";
 import { sendWebhook } from "./channels/webhook.js";
 
@@ -39,7 +35,15 @@ export async function dispatchNotification(params: {
       } else if (channel.kind === "dingtalk") {
         await sendDingTalk(channel, params.payload);
       } else {
-        throw new Error(`unknown channel kind: ${(channel as { kind: string }).kind}`);
+        // Attach `code` so a future "test channel" REST endpoint or alert
+        // engine retry policy can branch on this without parsing the
+        // message string. Project convention: assign on plain Error
+        // rather than declaring an Error subclass (cf. Next.js).
+        const unknown = new Error(
+          `unknown channel kind: ${(channel as { kind: string }).kind}`,
+        ) as Error & { code: string };
+        unknown.code = "ALERT_CHANNEL_UNKNOWN_KIND";
+        throw unknown;
       }
       results.push({ channelId, kind: channel.kind, ok: true });
     } catch (err) {

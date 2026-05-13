@@ -43,11 +43,7 @@ import { createCostsHandler } from "./costs/rest-routes.js";
 import { createDailyCostStoreRef } from "./costs/store-ref.js";
 import { createPricingRef } from "./probes/hook-metrics.js";
 import { createInsightsRoutes } from "./insights/rest-routes.js";
-import {
-  DEFAULT_MONITOR_CONFIG,
-  type HttpRouteParams,
-  type MonitorConfig,
-} from "./types.js";
+import { DEFAULT_MONITOR_CONFIG, type HttpRouteParams, type MonitorConfig } from "./types.js";
 
 const PLUGIN_ID = "openclaw-monitor";
 const UI_BASE_PATH = "/monitor";
@@ -95,7 +91,7 @@ function readPluginConfig(ctx: OpenClawPluginServiceContext): Partial<MonitorCon
     plugins?: { entries?: Record<string, { config?: unknown }> };
   };
   const raw = config?.plugins?.entries?.[PLUGIN_ID]?.config;
-  return (raw && typeof raw === "object" ? (raw as Partial<MonitorConfig>) : {}) ?? {};
+  return (raw && typeof raw === "object" ? raw : {}) ?? {};
 }
 
 type HostGateState = {
@@ -118,6 +114,18 @@ function readHostGateState(ctx: OpenClawPluginServiceContext): HostGateState {
   };
 }
 
+/**
+ * Build the per-process monitor bundle: a fresh aggregator, ring buffer,
+ * runs tracker, SSE bus, conversation probe, alert engine, and the full
+ * set of HTTP route descriptors.
+ *
+ * @param configOverride Optional partial config applied on top of
+ *   `DEFAULT_MONITOR_CONFIG`. The host config (`plugins.entries.openclaw-
+ *   monitor.config.*`) is layered in later from `service.start(ctx)`.
+ * @returns The bundle returned to the plugin entry. Callers are expected
+ *   to keep at most one bundle per process (see CLAUDE.md decision #12
+ *   for why multiple bundles cause silent zero-data bugs).
+ */
 export function createMonitorService(configOverride?: Partial<MonitorConfig>): MonitorBundle {
   let config = mergeConfig(configOverride);
 
@@ -184,6 +192,10 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       }
 
       conversationProbe.setConfig(config.audit);
+      // Start the abandoned-conversation sweeper. Bounds memory growth
+      // from channel-only flows where the sender never sends
+      // message_sending and host never fires agent_end (decision: v0.9.6).
+      conversationProbe.startSweeper();
 
       // Read-only hint: when audit is enabled in plugin config but the host
       // hasn't granted the matching security gate, log the exact command to
@@ -239,14 +251,10 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       // cadence as audit retention but with its own retention window
       // (default 90 days — long enough to cover "this month" with margin).
       try {
-        const dailyStore = createDailyCostStore(
-          path.join(resolveStorageRoot(ctx), "daily-costs"),
-        );
+        const dailyStore = createDailyCostStore(path.join(resolveStorageRoot(ctx), "daily-costs"));
         dailyCostStoreRef.set(dailyStore);
       } catch (err) {
-        ctx.logger?.warn?.(
-          `[${PLUGIN_ID}] failed to open daily-cost store: ${String(err)}`,
-        );
+        ctx.logger?.warn?.(`[${PLUGIN_ID}] failed to open daily-cost store: ${String(err)}`);
         dailyCostStoreRef.set(undefined);
       }
 
@@ -267,36 +275,71 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       // arrives. We rebuild state by feeding back the events the JSONL
       // store already captured. Replay happens *before* fanout.start so
       // we don't race the first incoming live events.
+      //
+      // Two safety knobs added in v0.9.2:
+      //   - REPLAY_TAIL_LIMIT caps the number of events we replay so a
+      //     very chatty day (millions of events) can't lock service.start
+      //     for tens of seconds. We replay the *most recent* N because
+      //     the rolling windows only need recent data anyway.
+      //   - REPLAY_CHUNK + setImmediate yield the event loop every N
+      //     events so the HTTP server can serve health checks while
+      //     replay is running, instead of blocking until done.
       const jsonlStoreNow = storeRef.get();
       if (jsonlStoreNow) {
-        try {
-          const today = new Date().toISOString().slice(0, 10);
-          const events = jsonlStoreNow.readEventsForDay(today);
-          let replayCount = 0;
-          for (const captured of events) {
-            try {
-              buffer.append(captured.event);
-              aggregator.ingest(captured.event, captured.capturedAt);
-              // runsTracker / conversationProbe are intentionally NOT
-              // replayed here — runs persist their own JSONL (loaded
-              // on-demand by /runs handler) and conversations live in
-              // audit/conversations-*.jsonl which is loaded separately.
-              // Re-injecting them here would double-count.
-              replayCount += 1;
-            } catch {
-              // best-effort
+        const REPLAY_TAIL_LIMIT = 100_000;
+        const REPLAY_CHUNK = 1_000;
+        const replay = async (): Promise<void> => {
+          try {
+            const today = new Date().toISOString().slice(0, 10);
+            const all = jsonlStoreNow.readEventsForDay(today);
+            const events = all.length > REPLAY_TAIL_LIMIT ? all.slice(-REPLAY_TAIL_LIMIT) : all;
+            const skipped = all.length - events.length;
+            let replayCount = 0;
+            for (let i = 0; i < events.length; i += REPLAY_CHUNK) {
+              const end = Math.min(i + REPLAY_CHUNK, events.length);
+              for (let j = i; j < end; j += 1) {
+                const captured = events[j];
+                if (!captured) continue;
+                try {
+                  // Preserve the original capturedAt from JSONL — without this
+                  // the buffer would stamp Date.now() and historical errors
+                  // would render as "just now" on Logs / Overview / Insights.
+                  buffer.append(captured.event, captured.capturedAt);
+                  aggregator.ingest(captured.event, captured.capturedAt);
+                  // runsTracker / conversationProbe are intentionally NOT
+                  // replayed here — runs persist their own JSONL and
+                  // conversations live in audit/conversations-*.jsonl.
+                  // Re-injecting them here would double-count.
+                  replayCount += 1;
+                } catch {
+                  // best-effort per event
+                }
+              }
+              // Yield to the event loop between chunks so the gateway can
+              // serve health checks / handle other plugins' startup work
+              // while we backfill.
+              if (end < events.length) {
+                await new Promise<void>((resolve) => setImmediate(resolve));
+              }
             }
-          }
-          if (replayCount > 0) {
-            ctx.logger?.info?.(
-              `[${PLUGIN_ID}] replayed ${replayCount} events from today's JSONL — channels / sources / models dimensions restored`,
+            if (replayCount > 0) {
+              const skippedNote =
+                skipped > 0 ? ` (skipped ${skipped} older events past tail limit)` : "";
+              ctx.logger?.info?.(
+                `[${PLUGIN_ID}] replayed ${replayCount} events from today's JSONL — channels / sources / models dimensions restored${skippedNote}`,
+              );
+            }
+          } catch (err) {
+            ctx.logger?.warn?.(
+              `[${PLUGIN_ID}] event replay failed (channels/sources start empty): ${String(err)}`,
             );
           }
-        } catch (err) {
-          ctx.logger?.warn?.(
-            `[${PLUGIN_ID}] event replay failed (channels/sources start empty): ${String(err)}`,
-          );
-        }
+        };
+        // Fire-and-forget. start() does not need to await for the gateway
+        // to be considered healthy — events arriving live during replay
+        // are interleaved correctly because both paths go through the
+        // same aggregator + buffer instances.
+        void replay();
       }
 
       fanout.start();
@@ -331,6 +374,7 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       auditStore?.close();
       conversationStoreRef.set(undefined);
       conversationProbe.setStore(undefined);
+      conversationProbe.stopSweeper();
       // Flush daily-cost in-memory tail to disk so the next start can read
       // today's totals back.
       const dailyStore = dailyCostStoreRef.get();

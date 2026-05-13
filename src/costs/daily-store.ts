@@ -100,8 +100,7 @@ export function createDailyCostStore(rootDir: string): DailyCostStore {
   // The plugin's stop() path calls flush() synchronously to drain.
   let flushTimer: NodeJS.Timeout | undefined;
 
-  const filePath = (day: string): string =>
-    path.join(rootDir, `daily-costs-${day}.json`);
+  const filePath = (day: string): string => path.join(rootDir, `daily-costs-${day}.json`);
 
   const load = (day: string): DailyCostFile => {
     const cached = cache.get(day);
@@ -181,8 +180,11 @@ export function createDailyCostStore(rootDir: string): DailyCostStore {
   const readDay: DailyCostStore["readDay"] = (day) => {
     const file = filePath(day);
     if (!fs.existsSync(file)) {
-      const cached = cache.get(day);
-      return cached?.cost ? cached : undefined;
+      // In-memory days before the 1s flush, OR providers with no pricing
+      // entry (tokens > 0 but cost === 0). Returning by truthiness of `cost`
+      // would drop legitimate token-only days; return the cached snapshot
+      // whenever it exists.
+      return cache.get(day);
     }
     return load(day);
   };
@@ -195,7 +197,7 @@ export function createDailyCostStore(rootDir: string): DailyCostStore {
         if (!entry.isFile()) continue;
         const match = FILENAME_RE.exec(entry.name);
         if (!match) continue;
-        out.push(match[1] as string);
+        out.push(match[1]);
       }
       // Folded any in-memory day not yet flushed.
       for (const day of cache.keys()) {

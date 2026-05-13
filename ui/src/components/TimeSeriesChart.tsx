@@ -35,16 +35,16 @@ export function TimeSeriesChart({ metric, windowSec = 900, height = 200 }: Props
         if (active) setError(String(err));
       }
     };
-    refresh();
-    const timer = setInterval(refresh, 5_000);
+    // Fire-and-forget. `refresh` swallows its own errors via setError.
+    void refresh();
+    const timer = setInterval(() => void refresh(), 5_000);
     return () => {
       active = false;
       clearInterval(timer);
     };
   }, [metric, windowSec]);
 
-  if (error)
-    return <div className="error-banner">{t("chart.loadFailed", { error })}</div>;
+  if (error) return <div className="error-banner">{t("chart.loadFailed", { error })}</div>;
   if (points.length === 0) return <div className="empty">{t("chart.noData")}</div>;
 
   const data = points.map((p) => ({

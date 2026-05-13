@@ -57,9 +57,7 @@ export function extractDimensions(event: DiagnosticEventPayload): EventDimension
   if (errorMessage) dims.errorMessage = errorMessage;
 
   const duration =
-    asNumber(raw["durationMs"]) ??
-    asNumber(raw["duration"]) ??
-    asNumber(raw["latencyMs"]);
+    asNumber(raw["durationMs"]) ?? asNumber(raw["duration"]) ?? asNumber(raw["latencyMs"]);
   if (duration !== undefined) dims.durationMs = duration;
 
   const tokensIn = asNumber(raw["tokensIn"]) ?? asNumber(raw["inputTokens"]);
@@ -103,6 +101,19 @@ export function isMessageQueuedEvent(event: DiagnosticEventPayload): boolean {
   return event.type === "message.queued";
 }
 
+// Internal-trigger names the host occasionally stamps into `ctx.channelId`
+// **as the literal channel value** rather than the INTERNAL_MESSAGE_CHANNEL
+// constant "webchat" with a separate trigger field. Empirically observed
+// on heartbeat-driven agent runs: ctx.channelId="heartbeat" (not "webchat"),
+// trigger="heartbeat". Without this special-case, extractSource would route
+// these into `channel:heartbeat` which renders as if there were a channel
+// plugin called "heartbeat" — confusing for operators looking at the
+// Sources page. We mirror the same set the host uses for trigger names
+// inside the webchat branch below, kept here in one constant so adding a
+// new internal trigger (e.g. some future "scheduled" / "queue") only
+// requires editing this list.
+const INTERNAL_TRIGGER_NAMES = new Set(["heartbeat", "cron", "webhook"]);
+
 // Classifies events by entry path (Control UI, OpenAI-compatible API, channel
 // plugin, internal trigger, ...).
 //
@@ -123,17 +134,24 @@ export function isMessageQueuedEvent(event: DiagnosticEventPayload): boolean {
 //      path where conversation-probe synthesises trigger="channel-message".
 //
 // Channels that aren't "webchat" come from an explicit channel plugin
-// (telegram, discord, feishu, etc.) and pass through as `channel:<name>`.
+// (telegram, discord, feishu, etc.) and pass through as `channel:<name>`
+// UNLESS the channel value itself is an internal-trigger name (see above).
 export function extractSource(dims: EventDimensions): string | undefined {
   const channel = dims.channel;
   if (!channel) return undefined;
+  // Host-data quirk: ctx.channelId is the literal trigger name on internal
+  // agent runs. Route to internal:<name> to match the trigger-driven path
+  // (webchat + trigger=heartbeat case below).
+  if (INTERNAL_TRIGGER_NAMES.has(channel)) {
+    return `internal:${channel}`;
+  }
   if (channel === "webchat") {
     const runId = dims.runId;
     if (runId?.startsWith("chatcmpl_")) return "openai-api";
     if (runId?.startsWith("ctrl_")) return "control-ui";
     const trigger = dims.trigger;
     if (trigger === "channel-message") return "control-ui";
-    if (trigger === "heartbeat" || trigger === "cron" || trigger === "webhook") {
+    if (INTERNAL_TRIGGER_NAMES.has(trigger ?? "")) {
       return `internal:${trigger}`;
     }
     if (trigger === "user") return "openai-api";

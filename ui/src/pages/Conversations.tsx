@@ -5,6 +5,7 @@ import { Pagination } from "../components/Pagination.js";
 import { friendlyEntryLabel, inferEntryKey } from "../entry-label.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
+import { useTimeWindow, WINDOW_TO_SECONDS } from "../time-window.js";
 
 function fmtDuration(ms: number | undefined): string {
   if (ms === undefined) return "—";
@@ -29,10 +30,7 @@ function SessionRow({ group }: { group: SessionGroup }) {
   const [open, setOpen] = useState(false);
   const sessionLabel = group.sessionKey === "_ungrouped" ? "—" : group.sessionKey;
   return (
-    <div
-      className="panel"
-      style={{ marginBottom: 12, padding: 0 }}
-    >
+    <div className="panel" style={{ marginBottom: 12, padding: 0 }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -80,11 +78,7 @@ function SessionRow({ group }: { group: SessionGroup }) {
             <span>{t("conversations.session.runs", { count: group.runCount })}</span>
             {(() => {
               const firstRun = group.conversations[0];
-              const key = inferEntryKey(
-                group.channelId,
-                firstRun?.trigger,
-                firstRun?.runId,
-              );
+              const key = inferEntryKey(group.channelId, firstRun?.trigger, firstRun?.runId);
               if (!key) return null;
               return (
                 <span
@@ -99,7 +93,8 @@ function SessionRow({ group }: { group: SessionGroup }) {
               );
             })()}
             <span>
-              · {t("conversations.session.tokens", {
+              ·{" "}
+              {t("conversations.session.tokens", {
                 input: group.totalTokensIn,
                 output: group.totalTokensOut,
               })}
@@ -160,26 +155,61 @@ function SessionRow({ group }: { group: SessionGroup }) {
 
 export function Conversations() {
   const { t } = useI18n();
+  // "all" | "errors" | "ok" — most common on-call workflow is "show me
+  // only the failed dialogues today", so filter is first-class.
+  const [errorFilter, setErrorFilter] = useState<"all" | "errors" | "ok">("all");
   // Pull a generous slice so client-side paging has room; the API tops
   // out at 500 sessions per response, plenty for a single dashboard view.
-  const fetcher = useMemo(() => () => api.conversationsBySession(500), []);
+  const fetcher = useMemo(
+    () => () =>
+      api.conversationsBySession(500, {
+        ...(errorFilter === "errors" ? { hasError: true } : {}),
+        ...(errorFilter === "ok" ? { hasError: false } : {}),
+      }),
+    [errorFilter],
+  );
   const { data, error } = usePolling(fetcher, 5_000);
+  const { window: timeWindow } = useTimeWindow();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
 
-  const allSessions = data?.sessions ?? [];
-  const pagedSessions = allSessions.slice(page * pageSize, (page + 1) * pageSize);
+  // Filter session groups by lastSeenAt — a session whose most recent
+  // conversation ended outside the window is hidden. Per-conversation
+  // filtering inside a group would feel surprising (operators usually
+  // think of the session as a unit).
+  const cutoffMs = Date.now() - WINDOW_TO_SECONDS[timeWindow] * 1000;
+  const allSessions = (data?.sessions ?? []).filter((s) => Date.parse(s.lastSeenAt) >= cutoffMs);
+  const safePage =
+    allSessions.length === 0 ? 0 : Math.min(page, Math.floor((allSessions.length - 1) / pageSize));
+  const pagedSessions = allSessions.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
   return (
     <div>
       <h2 className="page-title">{t("conversations.title")}</h2>
       <div className="subtitle">
-        {t("conversations.subtitle", { active: data?.active ?? 0 })}
+        {t("conversations.subtitle", { active: data?.active ?? 0 })} ·{" "}
+        {t(`topbar.window.${timeWindow}`)}
+      </div>
+
+      <div className="toolbar">
+        <label htmlFor="conv-error-filter">{t("conversations.filter.status")}</label>
+        <select
+          id="conv-error-filter"
+          value={errorFilter}
+          onChange={(e) => {
+            setErrorFilter(e.target.value as "all" | "errors" | "ok");
+            setPage(0);
+          }}
+        >
+          <option value="all">{t("common.any")}</option>
+          <option value="errors">{t("conversations.filter.errorsOnly")}</option>
+          <option value="ok">{t("conversations.filter.okOnly")}</option>
+        </select>
       </div>
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {data && data.sessions.length === 0 ? (
+      {data && allSessions.length === 0 ? (
         <div className="panel">
           <div className="empty">
             <div style={{ marginBottom: 12, fontSize: 14 }}>{t("conversations.empty")}</div>
@@ -193,13 +223,13 @@ export function Conversations() {
         </div>
       ) : null}
 
-      {data && data.sessions.length > 0 ? (
+      {data && allSessions.length > 0 ? (
         <div>
           {pagedSessions.map((group) => (
             <SessionRow key={group.sessionKey} group={group} />
           ))}
           <Pagination
-            page={page}
+            page={safePage}
             pageSize={pageSize}
             total={allSessions.length}
             onPageChange={setPage}

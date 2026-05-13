@@ -8,12 +8,23 @@ export function createSseStreamHandler(params: {
   heartbeatMs: number;
 }): OpenClawPluginHttpRouteHandler {
   return async (req: IncomingMessage, res: ServerResponse) => {
-    if (params.bus.size() >= params.maxSubscribers) {
+    // Atomic check-and-add via bus.subscribe — see event-bus.ts for why
+    // we don't split into a size() + subscribe() pair anymore.
+    const unsubscribe = params.bus.subscribe(({ event, capturedAt }) => {
+      try {
+        const payload = JSON.stringify({ capturedAt, event });
+        res.write(`event: diagnostic\ndata: ${payload}\n\n`);
+      } catch {
+        // socket likely closed
+      }
+    });
+    if (!unsubscribe) {
       res.statusCode = 503;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.end(JSON.stringify({ error: "too_many_subscribers" }));
       return true;
     }
+    void params.maxSubscribers; // capacity enforced by bus itself now
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -33,16 +44,10 @@ export function createSseStreamHandler(params: {
     }, params.heartbeatMs);
     heartbeat.unref?.();
 
-    const unsubscribe = params.bus.subscribe(({ event, capturedAt }) => {
-      try {
-        const payload = JSON.stringify({ capturedAt, event });
-        res.write(`event: diagnostic\ndata: ${payload}\n\n`);
-      } catch {
-        // socket likely closed
-      }
-    });
-
+    let closed = false;
     const close = (): void => {
+      if (closed) return;
+      closed = true;
       clearInterval(heartbeat);
       unsubscribe();
       try {

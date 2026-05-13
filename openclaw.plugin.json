@@ -169,6 +169,11 @@
                 "atAll": {
                   "type": "boolean",
                   "description": "DingTalk only. Set true to @everyone in the target group."
+                },
+                "allowPrivateNetwork": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Opt-in to point this channel at a private / loopback / link-local host (e.g. an internal receiver at 10.x.x.x). Off by default so a typoed config can't trivially SSRF the local network."
                 }
               },
               "required": ["kind", "url"]

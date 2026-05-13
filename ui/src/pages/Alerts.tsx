@@ -55,7 +55,9 @@ export function Alerts() {
 
   const now = Date.now();
   const rules = rulesData?.rules ?? [];
-  const active: ActiveAlert[] = activeData?.active ?? [];
+  // Wrap fallback in useMemo so the `[]` literal isn't a fresh reference on
+  // every render — otherwise activeByRule below recomputes every tick.
+  const active: ActiveAlert[] = useMemo(() => activeData?.active ?? [], [activeData]);
   const history: AlertHistoryEntry[] = historyData?.entries ?? [];
   const running = rulesData?.running ?? false;
 
@@ -93,7 +95,19 @@ export function Alerts() {
         </div>
       ) : null}
 
-      <div className="panel" style={{ marginBottom: 16 }}>
+      <div
+        className="panel"
+        style={{
+          marginBottom: 16,
+          // When alerts are firing, give the panel an unmistakable
+          // left-border accent so operators glancing at the page can
+          // instantly see "something is on fire" — visual weight should
+          // match operational severity (UI rule "color is not the only
+          // indicator" is preserved: the table content carries the signal,
+          // the border is reinforcement).
+          ...(active.length > 0 ? { borderLeft: "3px solid var(--error)" } : {}),
+        }}
+      >
         <h3>{t("alerts.section.active")}</h3>
         {active.length === 0 ? (
           <div className="empty">{t("alerts.empty.active")}</div>
@@ -103,7 +117,7 @@ export function Alerts() {
               <tr>
                 <th>{t("alerts.col.severity")}</th>
                 <th>{t("alerts.col.rule")}</th>
-                <th>{t("alerts.col.rule")} expr</th>
+                <th>{t("alerts.col.ruleExpr")}</th>
                 <th className="num">{t("alerts.col.value")}</th>
                 <th>{t("alerts.col.firedAt")}</th>
                 <th>{t("alerts.col.lastNotified")}</th>
@@ -153,9 +167,7 @@ export function Alerts() {
                     <td>{rule.channels.join(", ")}</td>
                     <td>
                       <StatusDot ok={!isActive} />
-                      {isActive
-                        ? t("alerts.status.firing")
-                        : t("alerts.status.ok")}
+                      {isActive ? t("alerts.status.firing") : t("alerts.status.ok")}
                     </td>
                   </tr>
                 );
@@ -201,8 +213,7 @@ export function Alerts() {
             <tbody>
               {history.map((entry, idx) => {
                 const allOk =
-                  entry.notifications.length === 0 ||
-                  entry.notifications.every((n) => n.ok);
+                  entry.notifications.length === 0 || entry.notifications.every((n) => n.ok);
                 return (
                   <tr key={`${entry.capturedAt}-${idx}`}>
                     <td>{fmtRelative(entry.capturedAt, now)}</td>
@@ -221,9 +232,7 @@ export function Alerts() {
                       {entry.notifications.length === 0
                         ? "—"
                         : entry.notifications
-                            .map((n) =>
-                              `${n.channelId}:${n.ok ? "ok" : `fail(${n.error ?? "?"})`}`,
-                            )
+                            .map((n) => `${n.channelId}:${n.ok ? "ok" : `fail(${n.error ?? "?"})`}`)
                             .join("; ")}
                     </td>
                   </tr>

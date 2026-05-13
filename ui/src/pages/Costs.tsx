@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -12,6 +14,13 @@ import { api, type CostDimensionRow, type CostRangeSummary } from "../api.js";
 import { StatCard } from "../components/StatCard.js";
 import { usePolling } from "../hooks.js";
 import { useI18n } from "../i18n/index.js";
+import { useTimeWindow } from "../time-window.js";
+import type { TimeWindow } from "../time-window.js";
+
+function costWindowKey(w: TimeWindow): "1m" | "5m" | "15m" | "1h" {
+  if (w === "1m" || w === "5m" || w === "15m" || w === "1h") return w;
+  return "1h";
+}
 
 function fmtMoney(value: number, currency: string): string {
   // The currency string is a free-form display unit (CNY / USD / EUR ...).
@@ -79,10 +88,7 @@ function RangeStatCard({
 }) {
   const { t } = useI18n();
   const totalTokens =
-    range.tokensIn +
-    range.tokensOut +
-    range.cacheReadTokens +
-    range.cacheWriteTokens;
+    range.tokensIn + range.tokensOut + range.cacheReadTokens + range.cacheWriteTokens;
   return (
     <StatCard
       label={label}
@@ -95,6 +101,7 @@ function RangeStatCard({
 
 export function Costs() {
   const { t } = useI18n();
+  const { window: timeWindow } = useTimeWindow();
   const fetcher = useMemo(() => api.costs, []);
   const { data, error } = usePolling(fetcher, 10_000);
 
@@ -106,6 +113,7 @@ export function Costs() {
     day: d.day,
     cost: Number(d.cost.toFixed(4)),
   }));
+  const windowedRange = data.windows[costWindowKey(timeWindow)];
 
   return (
     <div>
@@ -118,11 +126,18 @@ export function Costs() {
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
+        {/* First card now follows the global window selector — most-asked
+            question is "how much did I spend in the last N minutes / hour".
+            today / thisWeek / thisMonth are still on the second row so the
+            persistent context isn't lost. */}
         <RangeStatCard
-          label={t("costs.range.today")}
-          range={data.today}
+          label={t("costs.range.window", {
+            window: t(`topbar.window.${costWindowKey(timeWindow)}`),
+          })}
+          range={windowedRange}
           currency={currency}
         />
+        <RangeStatCard label={t("costs.range.today")} range={data.today} currency={currency} />
         <RangeStatCard
           label={t("costs.range.thisWeek")}
           range={data.thisWeek}
@@ -131,11 +146,6 @@ export function Costs() {
         <RangeStatCard
           label={t("costs.range.thisMonth")}
           range={data.thisMonth}
-          currency={currency}
-        />
-        <RangeStatCard
-          label={t("costs.range.sinceStart")}
-          range={data.sinceStart}
           currency={currency}
         />
       </div>
@@ -185,11 +195,47 @@ export function Costs() {
       <div className="grid cols-2" style={{ marginBottom: 16 }}>
         <div className="panel">
           <h3>{t("costs.section.byModel")}</h3>
-          <DimensionTable
-            rows={data.byModel}
-            currency={currency}
-            keyLabel={t("costs.col.model")}
-          />
+          {/* Horizontal "share of cost" bar chart above the table (v0.9.7).
+              Surfaces "which model is eating my budget" at a glance — the
+              table below still has the precise numbers for follow-up. */}
+          {data.byModel.length > 0 && data.byModel.some((m) => m.cost > 0) ? (
+            <div style={{ height: Math.max(60, Math.min(220, data.byModel.length * 28)) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={[...data.byModel].sort((a, b) => b.cost - a.cost).slice(0, 8)}
+                  layout="vertical"
+                  margin={{ top: 4, right: 16, bottom: 4, left: 8 }}
+                >
+                  <CartesianGrid horizontal={false} stroke="#2a3142" />
+                  <XAxis
+                    type="number"
+                    stroke="#8b949e"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) => fmtMoney(v, currency)}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="key"
+                    stroke="#8b949e"
+                    tick={{ fontSize: 11, fontFamily: "var(--mono)" }}
+                    width={150}
+                  />
+                  <Tooltip
+                    formatter={(v: number) => fmtMoney(v, currency)}
+                    contentStyle={{
+                      background: "#161b22",
+                      border: "1px solid #2a3142",
+                      borderRadius: 6,
+                      fontSize: 12,
+                    }}
+                  />
+                  {/* matches --accent */}
+                  <Bar dataKey="cost" fill="#58a6ff" radius={[0, 3, 3, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : null}
+          <DimensionTable rows={data.byModel} currency={currency} keyLabel={t("costs.col.model")} />
         </div>
         <div className="panel">
           <h3>{t("costs.section.byChannel")}</h3>
@@ -203,31 +249,37 @@ export function Costs() {
 
       <div className="panel">
         <h3>{t("costs.section.bySource")}</h3>
-        <DimensionTable
-          rows={data.bySource}
-          currency={currency}
-          keyLabel={t("costs.col.source")}
-        />
+        <DimensionTable rows={data.bySource} currency={currency} keyLabel={t("costs.col.source")} />
       </div>
 
       {data.byModel.every((m) => m.tokensIn === 0 && m.tokensOut === 0) &&
       data.byModel.length > 0 ? (
-        <div
-          className="panel"
-          style={{ marginTop: 16, borderLeft: "3px solid var(--warn)" }}
-        >
+        <div className="panel" style={{ marginTop: 16, borderLeft: "3px solid var(--warn)" }}>
           <div style={{ fontSize: 13, color: "var(--warn)", marginBottom: 8 }}>
             {t("costs.notice.noTokens")}
           </div>
-          <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.6 }}>
-            {t("costs.notice.noTokensHint")}
+          {/* Three-tier diagnostic. The same shape as ConversationDetail's
+              half-captured hint (decision #42): tell the operator the most
+              common cause, the second most common, and the rare one — in
+              order of likelihood — so they can fix it without spelunking
+              through host source. */}
+          <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.7 }}>
+            <div style={{ marginBottom: 6 }}>
+              <strong style={{ color: "var(--text)" }}>1.</strong>{" "}
+              {t("costs.notice.noTokensHint.gate")}
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              <strong style={{ color: "var(--text)" }}>2.</strong>{" "}
+              {t("costs.notice.noTokensHint.compat")}
+            </div>
+            <div>
+              <strong style={{ color: "var(--text)" }}>3.</strong>{" "}
+              {t("costs.notice.noTokensHint.adapter")}
+            </div>
           </div>
         </div>
       ) : data.byModel.every((m) => m.cost === 0) && data.byModel.length > 0 ? (
-        <div
-          className="panel"
-          style={{ marginTop: 16, borderLeft: "3px solid var(--warn)" }}
-        >
+        <div className="panel" style={{ marginTop: 16, borderLeft: "3px solid var(--warn)" }}>
           <div style={{ fontSize: 13, color: "var(--warn)", marginBottom: 8 }}>
             {t("costs.notice.noPricing")}
           </div>

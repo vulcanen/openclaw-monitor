@@ -32,6 +32,30 @@ function getBundle(): MonitorBundle {
 }
 
 let routesAndServiceWired = false;
+
+/**
+ * `@vulcanen/openclaw-monitor` plugin entry.
+ *
+ * The default export is the result of `definePluginEntry(...)` and is what
+ * the OpenClaw host loads when this package is listed under
+ * `plugins.allow`. The plugin itself:
+ *
+ * - subscribes to the host's diagnostic event bus + hook system,
+ *   aggregates per-type / per-channel / per-model rollups, and persists
+ *   a rolling JSONL ring;
+ * - registers the monitor HTTP API under `/api/monitor/*` (trusted-
+ *   operator gateway scope) and the dashboard SPA under `/monitor`
+ *   (public, browser-friendly auth — see CLAUDE.md decision #7);
+ * - optionally captures full conversation content via the gated hooks
+ *   (`llm_input` / `llm_output` / `agent_end`), driven by the host's
+ *   `allowConversationAccess` security gate;
+ * - exposes an in-process alert engine that pushes to webhook /
+ *   DingTalk channels on threshold rules.
+ *
+ * State lives in module-level singletons (see `sharedBundle`) so the
+ * host's multi-load-profile re-entrancy doesn't fragment the runtime;
+ * see CLAUDE.md decision #12 for the why.
+ */
 export default definePluginEntry({
   id: "openclaw-monitor",
   name: "OpenClaw Monitor",
