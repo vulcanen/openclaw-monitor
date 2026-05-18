@@ -52,7 +52,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.7.0",
-    "eslint": "^9.39.4",
+    "eslint": "^10.4.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "globals": "^15.15.0",
     "openclaw": "2026.5.7",
