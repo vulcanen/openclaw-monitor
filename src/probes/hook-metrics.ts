@@ -122,6 +122,15 @@ function makeRunContextRegistry() {
 // remembering which `api` objects we already installed on.
 const installedApis = new WeakSet<OpenClawPluginApi>();
 
+// Forward-compatible API view: hook names and ctx fields added in host 2026.5.14+
+// are not yet in the 2026.5.7 published SDK types we compile against. Host
+// 2026.5.7-2026.5.17 will only `warn` and ignore unknown hook names (host loader
+// `registerTypedHook` returns early with a diagnostic) — never throw — so it is
+// safe to register them unconditionally. See decision #59 for the full list.
+type ForwardCompatPluginApi = {
+  on(name: string, handler: (event: unknown, ctx: unknown) => unknown): void;
+};
+
 export function installHookMetrics(params: {
   api: OpenClawPluginApi;
   fanout: EventFanout;
@@ -133,6 +142,7 @@ export function installHookMetrics(params: {
   const pricing = params.pricing ?? createPricingRef();
   const runCtx = makeRunContextRegistry();
   let tokenSeq = 0;
+  const apiFC = api as unknown as ForwardCompatPluginApi;
 
   const enrich = (synth: Record<string, unknown>, runId?: string): void => {
     if (synth["channel"] !== undefined && synth["trigger"] !== undefined) return;
@@ -148,6 +158,25 @@ export function installHookMetrics(params: {
 
   // ── Model calls ───────────────────────────────────────────────────────────
 
+  // 2026.5.14+ adds contextTokenBudget / contextWindowSource /
+  // contextWindowReferenceTokens to PluginHookModelCallBaseEvent (decision #59).
+  // The fields are read defensively via cast since we still compile against
+  // the 2026.5.7 SDK.
+  const copyModelCallContextFields = (
+    source: Record<string, unknown>,
+    target: Record<string, unknown>,
+  ): void => {
+    if (typeof source["contextTokenBudget"] === "number") {
+      target["contextTokenBudget"] = source["contextTokenBudget"];
+    }
+    if (typeof source["contextWindowSource"] === "string") {
+      target["contextWindowSource"] = source["contextWindowSource"];
+    }
+    if (typeof source["contextWindowReferenceTokens"] === "number") {
+      target["contextWindowReferenceTokens"] = source["contextWindowReferenceTokens"];
+    }
+  };
+
   api.on("model_call_started", (event, ctx) => {
     const synth: Record<string, unknown> = {
       type: "model.call.started",
@@ -162,6 +191,7 @@ export function installHookMetrics(params: {
     if (event.transport !== undefined) synth["transport"] = event.transport;
     if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
     if (ctx.trigger !== undefined) synth["trigger"] = ctx.trigger;
+    copyModelCallContextFields(event, synth);
     enrich(synth, event.runId);
     fanout.inject(synth as DiagnosticEventPayload);
   });
@@ -183,6 +213,7 @@ export function installHookMetrics(params: {
     if (event.errorCategory !== undefined) synth["errorCategory"] = event.errorCategory;
     if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
     if (ctx.trigger !== undefined) synth["trigger"] = ctx.trigger;
+    copyModelCallContextFields(event, synth);
     enrich(synth, event.runId);
     fanout.inject(synth as DiagnosticEventPayload);
   });
@@ -213,6 +244,16 @@ export function installHookMetrics(params: {
       return;
     }
     tokenSeq += 1;
+    // host 2026.5.14+ (#64327) adds context-budget + resolved-ref + harness
+    // metadata to llm_output. Read defensively via cast since the compile-time
+    // SDK is pinned to 2026.5.7. See decision #59 in rules/host-contract.md.
+    const eventExt = event as {
+      contextTokenBudget?: number;
+      contextWindowSource?: "model" | "modelsConfig" | "agentContextTokens" | "default";
+      contextWindowReferenceTokens?: number;
+      resolvedRef?: string;
+      harnessId?: string;
+    };
     const synth = buildTokenEvent({
       pricing: pricing.get(),
       ...(event.runId !== undefined ? { runId: event.runId } : {}),
@@ -229,6 +270,17 @@ export function installHookMetrics(params: {
         ...(cacheWrite !== undefined ? { cacheWriteTokens: cacheWrite } : {}),
       },
       seq: tokenSeq,
+      ...(eventExt.contextTokenBudget !== undefined
+        ? { contextTokenBudget: eventExt.contextTokenBudget }
+        : {}),
+      ...(eventExt.contextWindowSource !== undefined
+        ? { contextWindowSource: eventExt.contextWindowSource }
+        : {}),
+      ...(eventExt.contextWindowReferenceTokens !== undefined
+        ? { contextWindowReferenceTokens: eventExt.contextWindowReferenceTokens }
+        : {}),
+      ...(eventExt.resolvedRef !== undefined ? { resolvedRef: eventExt.resolvedRef } : {}),
+      ...(eventExt.harnessId !== undefined ? { harnessId: eventExt.harnessId } : {}),
     });
     // Backfill channel/trigger from the runId cache for the (rare) case
     // where the llm_output ctx doesn't carry them yet but agent_turn_prepare
@@ -240,18 +292,29 @@ export function installHookMetrics(params: {
 
   // ── Tool execution ────────────────────────────────────────────────────────
 
-  api.on("before_tool_call", (event, _ctx) => {
+  // host >= 2026.5.18 (#83387) populates channelId / sessionId / sessionKey /
+  // agentId on PluginHookToolContext. We prefer those when present, then fall
+  // back to the runCtx registry (decision #13) for 2026.5.7 - 2026.5.17.
+  // The runId / channel writes from ctx short-circuit `enrich`'s lookups, so
+  // we don't pay a Map.get() per tool call on the modern host.
+  api.on("before_tool_call", (event, ctx) => {
     const synth: Record<string, unknown> = {
       type: "tool.execution.started",
       toolName: event.toolName,
     };
     if (event.runId !== undefined) synth["runId"] = event.runId;
     if (event.toolCallId !== undefined) synth["toolCallId"] = event.toolCallId;
+    // host >= 2026.5.18 channelId on tool ctx — see decision #59.
+    const ctxExt = ctx as { channelId?: string };
+    if (ctxExt.channelId !== undefined) synth["channel"] = ctxExt.channelId;
+    if (ctx.sessionId !== undefined) synth["sessionId"] = ctx.sessionId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
     enrich(synth, event.runId);
     fanout.inject(synth as DiagnosticEventPayload);
   });
 
-  api.on("after_tool_call", (event, _ctx) => {
+  api.on("after_tool_call", (event, ctx) => {
     const isError = Boolean(event.error);
     const synth: Record<string, unknown> = {
       type: isError ? "tool.execution.error" : "tool.execution.completed",
@@ -261,6 +324,11 @@ export function installHookMetrics(params: {
     if (event.toolCallId !== undefined) synth["toolCallId"] = event.toolCallId;
     if (typeof event.durationMs === "number") synth["durationMs"] = event.durationMs;
     if (event.error) synth["errorMessage"] = event.error;
+    const ctxExt = ctx as { channelId?: string };
+    if (ctxExt.channelId !== undefined) synth["channel"] = ctxExt.channelId;
+    if (ctx.sessionId !== undefined) synth["sessionId"] = ctx.sessionId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
     enrich(synth, event.runId);
     fanout.inject(synth as DiagnosticEventPayload);
   });
@@ -429,5 +497,247 @@ export function installHookMetrics(params: {
     if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
     if (ctx.trigger !== undefined) synth["trigger"] = ctx.trigger;
     fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Subagent lifecycle (v0.9.8) ─────────────────────────────────────────
+  // Subagents are first-class in OpenClaw — every "research a topic", "edit
+  // these files", or "draft a Slack reply" delegated to a child session goes
+  // through these hooks. Without them, multi-agent operations look like a
+  // single long agent run with no breakdown of who spawned whom or what
+  // succeeded vs failed. We synthesize three event types so Logs / Events /
+  // Insights can pivot on subagent activity without adding an aggregator
+  // dimension (per decision #51).
+  api.on("subagent_spawning", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "subagent.lifecycle.spawning",
+      childSessionKey: event.childSessionKey,
+      agentId: event.agentId,
+      mode: event.mode,
+      threadRequested: event.threadRequested,
+    };
+    if (event.label !== undefined) synth["label"] = event.label;
+    if (event.requester?.channel !== undefined) synth["channel"] = event.requester.channel;
+    if (ctx.runId !== undefined) synth["runId"] = ctx.runId;
+    if (ctx.requesterSessionKey !== undefined) {
+      synth["requesterSessionKey"] = ctx.requesterSessionKey;
+    }
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  api.on("subagent_spawned", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "subagent.lifecycle.spawned",
+      childSessionKey: event.childSessionKey,
+      agentId: event.agentId,
+      mode: event.mode,
+      runId: event.runId,
+    };
+    if (event.label !== undefined) synth["label"] = event.label;
+    if (event.requester?.channel !== undefined) synth["channel"] = event.requester.channel;
+    if (ctx.requesterSessionKey !== undefined) {
+      synth["requesterSessionKey"] = ctx.requesterSessionKey;
+    }
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  api.on("subagent_ended", (event, _ctx) => {
+    const isError = event.outcome === "error" || event.outcome === "timeout";
+    const synth: Record<string, unknown> = {
+      type: isError ? "subagent.lifecycle.error" : "subagent.lifecycle.ended",
+      targetSessionKey: event.targetSessionKey,
+      targetKind: event.targetKind,
+      reason: event.reason,
+    };
+    if (event.outcome !== undefined) synth["outcome"] = event.outcome;
+    if (event.error !== undefined) synth["errorMessage"] = event.error;
+    if (event.runId !== undefined) synth["runId"] = event.runId;
+    if (event.accountId !== undefined) synth["accountId"] = event.accountId;
+    if (typeof event.endedAt === "number") synth["endedAt"] = event.endedAt;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Agent run gate / finalize / reset (v0.9.8) ─────────────────────────
+  // before_agent_run is a *gate* hook — it can block runs (return an
+  // InputGateDecision). We only observe; returning void leaves the run to
+  // proceed normally. Pairs with agent_end so Insights can show prompt size
+  // vs. final outcome.
+  // host 2026.5.7 SDK doesn't declare this hook yet; subscribe via the
+  // forward-compatible api view. Host 2026.5.7-2026.5.13 will warn-and-ignore.
+  apiFC.on("before_agent_run", (eventU, ctxU) => {
+    const event = eventU as {
+      prompt?: string;
+      messages?: unknown[];
+      systemPrompt?: string;
+      accountId?: string;
+      channelId?: string;
+      senderId?: string;
+    };
+    const ctx = ctxU as { runId?: string; sessionKey?: string };
+    const synth: Record<string, unknown> = {
+      type: "agent.run.starting",
+      messageCount: Array.isArray(event.messages) ? event.messages.length : 0,
+      promptBytes: typeof event.prompt === "string" ? event.prompt.length : 0,
+    };
+    if (event.systemPrompt !== undefined) {
+      synth["systemPromptBytes"] = event.systemPrompt.length;
+    }
+    if (event.channelId !== undefined) synth["channel"] = event.channelId;
+    if (event.accountId !== undefined) synth["accountId"] = event.accountId;
+    if (event.senderId !== undefined) synth["senderId"] = event.senderId;
+    if (ctx.runId !== undefined) synth["runId"] = ctx.runId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  api.on("before_agent_finalize", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "agent.finalize.starting",
+      sessionId: event.sessionId,
+      stopHookActive: event.stopHookActive,
+    };
+    if (event.runId !== undefined) synth["runId"] = event.runId;
+    if (event.turnId !== undefined) synth["turnId"] = event.turnId;
+    if (event.sessionKey !== undefined) synth["sessionKey"] = event.sessionKey;
+    if (event.provider !== undefined) synth["provider"] = event.provider;
+    if (event.model !== undefined) synth["model"] = event.model;
+    if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  api.on("before_reset", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "session.lifecycle.resetting",
+      messageCount: Array.isArray(event.messages) ? event.messages.length : 0,
+    };
+    if (event.reason !== undefined) synth["reason"] = event.reason;
+    if (ctx.runId !== undefined) synth["runId"] = ctx.runId;
+    if (ctx.sessionId !== undefined) synth["sessionId"] = ctx.sessionId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Model resolution (v0.9.8) ───────────────────────────────────────────
+  // before_model_resolve fires before the harness picks a concrete model
+  // for the run. event/ctx shapes vary by host version, so we inject a
+  // minimal record — operators can correlate it with the model.call.started
+  // event that follows.
+  api.on("before_model_resolve", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "model.lifecycle.resolving",
+    };
+    const e = event as Record<string, unknown>;
+    if (typeof e["modelRef"] === "string") synth["requestedRef"] = e["modelRef"];
+    if (typeof e["agentId"] === "string") synth["agentId"] = e["agentId"];
+    if (ctx.runId !== undefined) synth["runId"] = ctx.runId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  // ── Cron lifecycle (v0.9.8) ─────────────────────────────────────────────
+  // Heartbeat / scheduled / webhook triggers (decision #57) all flow
+  // through cron. Surfacing cron job lifecycle (added / removed / started /
+  // finished) lets the Sessions and Logs pages show "what's about to run"
+  // and "what just fired" without polling the scheduler.
+  api.on("cron_changed", (event, _ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "cron.changed",
+      action: event.action,
+      jobId: event.jobId,
+    };
+    // sessionTarget added in 2026.5.x — read defensively for 2026.5.7 SDK compile.
+    const eventExt = event as { sessionTarget?: string };
+    if (eventExt.sessionTarget !== undefined) synth["sessionTarget"] = eventExt.sessionTarget;
+    const job = event.job as { agentId?: string; payload?: { kind?: string } } | undefined;
+    if (job?.agentId !== undefined) synth["agentId"] = job.agentId;
+    if (job?.payload?.kind !== undefined) synth["payloadKind"] = job.payload.kind;
+    fanout.inject(synth as DiagnosticEventPayload);
+  });
+
+  // ── Heartbeat prompt contribution (v0.9.8) ──────────────────────────────
+  // Heartbeat-triggered agents call this hook so plugins can inject
+  // contextual hints. We observe it so the Logs page can show the rate of
+  // heartbeat firings and which agent / session is generating context for
+  // them.
+  api.on("heartbeat_prompt_contribution", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "heartbeat.contribution",
+    };
+    const e = event as Record<string, unknown>;
+    if (typeof e["heartbeatId"] === "string") synth["heartbeatId"] = e["heartbeatId"];
+    if (typeof e["channel"] === "string") synth["channel"] = e["channel"];
+    if (ctx.runId !== undefined) synth["runId"] = ctx.runId;
+    if (ctx.sessionKey !== undefined) synth["sessionKey"] = ctx.sessionKey;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  // ── Message-pipeline observability (v0.9.8) ─────────────────────────────
+  // inbound_claim / before_dispatch / reply_dispatch let other plugins
+  // short-circuit the message pipeline. We only observe (return void). The
+  // events join Logs / Events for replay; we do NOT add aggregator
+  // dimensions because channel-side message metrics (message.queued /
+  // delivered) are already accounted for elsewhere.
+  api.on("inbound_claim", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "inbound.claim.attempt",
+    };
+    const e = event as Record<string, unknown>;
+    if (typeof e["content"] === "string") synth["contentBytes"] = e["content"].length;
+    if (typeof e["sessionKey"] === "string") synth["sessionKey"] = e["sessionKey"];
+    if (ctx.channelId !== undefined) synth["channel"] = ctx.channelId;
+    if (ctx.accountId !== undefined) synth["accountId"] = ctx.accountId;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  api.on("before_dispatch", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "message.dispatch.before",
+      contentBytes: typeof event.content === "string" ? event.content.length : 0,
+    };
+    if (event.channel !== undefined) synth["channel"] = event.channel;
+    if (event.sessionKey !== undefined) synth["sessionKey"] = event.sessionKey;
+    if (event.isGroup !== undefined) synth["isGroup"] = event.isGroup;
+    if (ctx.channelId !== undefined && synth["channel"] === undefined) {
+      synth["channel"] = ctx.channelId;
+    }
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  api.on("reply_dispatch", (event, _ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "message.dispatch.reply",
+      sendPolicy: event.sendPolicy,
+      inboundAudio: event.inboundAudio,
+      shouldRouteToOriginating: event.shouldRouteToOriginating,
+    };
+    if (event.runId !== undefined) synth["runId"] = event.runId;
+    if (event.sessionKey !== undefined) synth["sessionKey"] = event.sessionKey;
+    if (event.originatingChannel !== undefined) synth["channel"] = event.originatingChannel;
+    if (event.ttsChannel !== undefined) synth["ttsChannel"] = event.ttsChannel;
+    if (typeof event.isTailDispatch === "boolean") synth["isTailDispatch"] = event.isTailDispatch;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
+  });
+
+  api.on("before_message_write", (event, ctx) => {
+    const synth: Record<string, unknown> = {
+      type: "message.write.before",
+    };
+    const e = event as Record<string, unknown>;
+    if (typeof e["role"] === "string") synth["role"] = e["role"];
+    if (typeof e["sessionKey"] === "string") synth["sessionKey"] = e["sessionKey"];
+    if (ctx.sessionKey !== undefined && synth["sessionKey"] === undefined) {
+      synth["sessionKey"] = ctx.sessionKey;
+    }
+    if (ctx.agentId !== undefined) synth["agentId"] = ctx.agentId;
+    fanout.inject(synth as DiagnosticEventPayload);
+    return undefined;
   });
 }

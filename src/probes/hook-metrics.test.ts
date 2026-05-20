@@ -283,4 +283,81 @@ describe("hook metrics probe", () => {
     expect(tools[0]?.key).toBe("shell");
     expect(tools[0]?.total).toBe(1);
   });
+
+  it("preserves channel/sessionKey/agentId from tool ctx when host >= 2026.5.18 populates them", async () => {
+    const { installHookMetrics } = await import("./hook-metrics.js");
+    const { createEventFanout } = await import("./event-subscriber.js");
+    const buffer = createEventBuffer({ maxPerType: 64 });
+    const aggregator = createAggregator();
+    const runsTracker = createRunsTracker();
+    const bus = createEventBus({ maxListeners: 4 });
+    const storeRef = createStoreRef();
+    const probe = (await import("../audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
+    const handlers: CapturedHandlers = {};
+    installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
+
+    // host >= 2026.5.18 path: ctx is populated; runCtx registry was never primed.
+    handlers["before_tool_call"]?.(
+      { toolName: "shell", params: {}, runId: "r-new", toolCallId: "tc-1" },
+      {
+        toolName: "shell",
+        channelId: "telegram",
+        sessionKey: "telegram:userX",
+        sessionId: "sess-9",
+        agentId: "default",
+      },
+    );
+
+    const recent = buffer.recent({ type: "tool.execution.started" });
+    expect(recent).toHaveLength(1);
+    const evt: Record<string, unknown> = recent[0].event;
+    expect(evt["channel"]).toBe("telegram");
+    expect(evt["sessionKey"]).toBe("telegram:userX");
+    expect(evt["sessionId"]).toBe("sess-9");
+    expect(evt["agentId"]).toBe("default");
+  });
+
+  it("falls back to runCtx registry for tool_call channel when ctx is empty (host 2026.5.7-2026.5.17)", async () => {
+    const { installHookMetrics } = await import("./hook-metrics.js");
+    const { createEventFanout } = await import("./event-subscriber.js");
+    const buffer = createEventBuffer({ maxPerType: 64 });
+    const aggregator = createAggregator();
+    const runsTracker = createRunsTracker();
+    const bus = createEventBus({ maxListeners: 4 });
+    const storeRef = createStoreRef();
+    const probe = (await import("../audit/conversation-probe.js")).createConversationProbe();
+    const fanout = createEventFanout({
+      buffer,
+      bus,
+      storeRef,
+      aggregator,
+      runsTracker,
+      conversationProbe: probe,
+    });
+    const handlers: CapturedHandlers = {};
+    installHookMetrics({ api: makeFakeApi(handlers) as never, fanout });
+
+    // agent_turn_prepare primes the runCtx registry on older hosts.
+    handlers["agent_turn_prepare"]?.({}, { runId: "r-old", channelId: "webchat", trigger: "user" });
+    // Old host ctx for tool_call is missing channelId / sessionKey etc.
+    handlers["before_tool_call"]?.(
+      { toolName: "fs.read", params: {}, runId: "r-old", toolCallId: "tc-2" },
+      {},
+    );
+
+    const recent = buffer.recent({ type: "tool.execution.started" });
+    expect(recent).toHaveLength(1);
+    const evt: Record<string, unknown> = recent[0].event;
+    // Channel came from runCtx registry, not ctx.
+    expect(evt["channel"]).toBe("webchat");
+    expect(evt["trigger"]).toBe("user");
+  });
 });

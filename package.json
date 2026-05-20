@@ -1,6 +1,6 @@
 {
   "name": "@vulcanen/openclaw-monitor",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "Self-contained real-time monitoring console for OpenClaw",
   "repository": {
     "type": "git",
@@ -15,6 +15,7 @@
   "files": [
     "dist",
     "openclaw.plugin.json",
+    "cli-metadata.js",
     "README.zh-CN.md"
   ],
   "scripts": {
@@ -40,14 +41,14 @@
     "install": {
       "npmSpec": "@vulcanen/openclaw-monitor",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.5.7"
+      "minHostVersion": ">=2026.5.18"
     },
     "compat": {
-      "pluginApi": ">=2026.5.7"
+      "pluginApi": ">=2026.5.18"
     },
     "build": {
-      "openclawVersion": "2026.5.7",
-      "pluginSdkVersion": "2026.5.7"
+      "openclawVersion": "2026.5.18",
+      "pluginSdkVersion": "2026.5.18"
     }
   },
   "devDependencies": {
@@ -55,7 +56,7 @@
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^5.2.0",
     "globals": "^15.15.0",
-    "openclaw": "2026.5.7",
+    "openclaw": "2026.5.18",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.3",

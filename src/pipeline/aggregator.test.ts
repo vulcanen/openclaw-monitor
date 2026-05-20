@@ -79,6 +79,79 @@ describe("aggregator", () => {
     expect(series.metric).toBe("model.calls");
     expect(series.points.length).toBeGreaterThan(0);
   });
+
+  it("rolls up avg + peak context utilization on llm.tokens.recorded with budget", () => {
+    const agg = createAggregator();
+    const now = Date.now();
+    // Two priced events with the same model: 30% util and 60% util → avg 45, peak 60.
+    agg.ingest(
+      makeEvent("llm.tokens.recorded", {
+        provider: "openai",
+        model: "gpt-5",
+        resolvedRef: "openai/gpt-5",
+        harnessId: "pi",
+        channel: "webchat",
+        inputTokens: 30_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0.5,
+        contextTokenBudget: 100_000,
+      }),
+      now,
+    );
+    agg.ingest(
+      makeEvent("llm.tokens.recorded", {
+        provider: "openai",
+        model: "gpt-5",
+        resolvedRef: "openai/gpt-5",
+        harnessId: "pi",
+        channel: "webchat",
+        inputTokens: 60_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0.5,
+        contextTokenBudget: 100_000,
+      }),
+      now + 5,
+    );
+
+    const wins = agg.windows();
+    expect(wins["5m"].avgContextUtilizationPct).toBeCloseTo(45, 1);
+    expect(wins["5m"].peakContextUtilizationPct).toBeCloseTo(60, 1);
+
+    // Dimensions get per-key averages.
+    const models = agg.models();
+    expect(models[0]?.key).toBe("openai/gpt-5");
+    expect(models[0]?.avgContextUtilizationPct).toBeCloseTo(45, 1);
+
+    const harnesses = agg.harnesses();
+    expect(harnesses[0]?.key).toBe("pi");
+    expect(harnesses[0]?.avgContextUtilizationPct).toBeCloseTo(45, 1);
+  });
+
+  it("omits utilization fields when llm.tokens.recorded has no budget (host < 2026.5.14)", () => {
+    const agg = createAggregator();
+    agg.ingest(
+      makeEvent("llm.tokens.recorded", {
+        provider: "openai",
+        model: "gpt-5",
+        inputTokens: 1_000,
+        outputTokens: 200,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0.1,
+        // No contextTokenBudget — old host path.
+      }),
+      Date.now(),
+    );
+    const wins = agg.windows();
+    expect(wins["5m"].avgContextUtilizationPct).toBeNull();
+    expect(wins["5m"].peakContextUtilizationPct).toBeNull();
+    expect(agg.models()[0]?.avgContextUtilizationPct).toBeUndefined();
+    expect(agg.harnesses()).toHaveLength(0); // no harnessId either
+  });
 });
 
 describe("runs tracker", () => {

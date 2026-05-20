@@ -203,6 +203,43 @@ export function Overview() {
         />
       </div>
 
+      {/* v0.9.8+: context-window utilization. Renders only when the host
+          actually populates avgContextUtilizationPct (host >= 2026.5.14 with
+          allowConversationAccess on). Hidden on older / gated installs so we
+          don't show four empty "—" cards. */}
+      {typeof snap.avgContextUtilizationPct === "number" ? (
+        <div className="grid cols-2" style={{ marginBottom: 16 }}>
+          <StatCard
+            label={t("stat.ctxUtilAvgWindow", { window: t(`topbar.window.${snapshotKey}`) })}
+            value={`${snap.avgContextUtilizationPct.toFixed(1)}%`}
+            tone={
+              snap.avgContextUtilizationPct >= 80
+                ? "bad"
+                : snap.avgContextUtilizationPct >= 60
+                  ? "warn"
+                  : "good"
+            }
+          />
+          <StatCard
+            label={t("stat.ctxUtilPeakWindow", { window: t(`topbar.window.${snapshotKey}`) })}
+            value={
+              typeof snap.peakContextUtilizationPct === "number"
+                ? `${snap.peakContextUtilizationPct.toFixed(1)}%`
+                : "—"
+            }
+            tone={
+              typeof snap.peakContextUtilizationPct === "number" &&
+              snap.peakContextUtilizationPct >= 90
+                ? "bad"
+                : typeof snap.peakContextUtilizationPct === "number" &&
+                    snap.peakContextUtilizationPct >= 75
+                  ? "warn"
+                  : "good"
+            }
+          />
+        </div>
+      ) : null}
+
       {/* Second row: lifecycle visibility — surfaced from the v0.9.6
           synthetic events session.lifecycle.* / agent.compaction.* /
           tool.result.persisted / gateway.lifecycle.*. These were

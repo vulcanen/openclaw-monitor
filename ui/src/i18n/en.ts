@@ -7,6 +7,7 @@ export const en: Strings = {
   "nav.channels": "Channels",
   "nav.models": "Models",
   "nav.tools": "Tools",
+  "nav.harnesses": "Harnesses",
   "nav.runs": "Runs",
   "nav.sessions": "Sessions",
   "nav.conversations": "Conversations",
@@ -252,6 +253,8 @@ export const en: Strings = {
   "stat.errorRateWindow": "error rate ({window})",
   "stat.modelP95Window": "model p95 ({window})",
   "stat.sessionAlertsWindow": "session alerts ({window})",
+  "stat.ctxUtilAvgWindow": "ctx utilization avg ({window})",
+  "stat.ctxUtilPeakWindow": "ctx utilization peak ({window})",
   "stat.errors": "{count} errors",
   "stat.errorRateDetail": "{errors}/{total}",
   "stat.latency": "latency",
@@ -289,6 +292,14 @@ export const en: Strings = {
     'OpenClaw\'s INTERNAL_MESSAGE_CHANNEL constant is `"webchat"` — it covers /v1/chat/completions, the Control UI built-in chat, heartbeat / cron triggers, every non-channel-plugin entry. Go to Sources to split by actual entry path.',
 
   // Models
+  "harnesses.title": "Harnesses",
+  "harnesses.subtitle":
+    "Per-harness token / cost / utilization rollup (v0.9.8+). Requires host 2026.5.14+ to populate `llm_output.harnessId` and the conversation-access gate to be on.",
+  "harnesses.rollup": "Harness rollup",
+  "harnesses.col.key": "Harness",
+  "harnesses.empty.noField":
+    "No harnessId data received. Either host < 2026.5.14 (decision #59) or the conversation-access gate is off (run `openclaw monitor setup --audit`).",
+
   "models.title": "Models",
   "models.subtitle": "model call breakdown by provider × model",
   "models.rollup": "per-model rollup",
@@ -342,6 +353,7 @@ export const en: Strings = {
   "dim.col.p95": "p95",
   "dim.col.tokensIn": "tokens in",
   "dim.col.tokensOut": "tokens out",
+  "dim.col.ctxUtil": "ctx util",
 
   // Logs
   "logs.title": "Logs",

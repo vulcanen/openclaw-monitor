@@ -6,12 +6,12 @@ OpenClaw 实时监控插件。订阅 OpenClaw 内部诊断事件总线，做指�
 
 ## 功能
 
-- **总览**：顶部健康横幅（正常 / 需要关注 / 故障三档）+ 1m / 5m / 15m / 1h 滑动窗口的模型调用量、错误率、P95 延迟、会话告警；第二排生命周期 stat card（活跃 session、今日 context 压缩次数、上次 gateway 启动时间、工具结果落盘次数）；今日 Top 入口来源面板
-- **维度统计**：按 channel、provider × model、tool、入口来源（OpenAI 兼容 API / Control UI / channel 插件）维度的调用计数、错误率、token 用量、耗时分位
+- **总览**：顶部健康横幅（正常 / 需要关注 / 故障三档）+ 1m / 5m / 15m / 1h 滑动窗口的模型调用量、错误率、P95 延迟、会话告警；第二排生命周期 stat card（活跃 session、今日 context 压缩次数、上次 gateway 启动时间、工具结果落盘次数）；当 host ≥ 2026.5.14 在 `llm_output` 上发送 `contextTokenBudget` 时，额外渲染**上下文利用率（平均 / 峰值）** stat card；今日 Top 入口来源面板
+- **维度统计**：按 channel、provider × model、tool、入口来源（OpenAI 兼容 API / Control UI / channel 插件）维度的调用计数、错误率、token 用量、耗时分位、以及（host ≥ 2026.5.14 起）**上下文预算利用率**；新增**执行框架（Harness）维度**（`pi` / `codex-app-server` / …），单独 Harnesses 页查看
 - **运行追踪**：harness 运行列表 + 单次运行完整事件 trace 下钻
 - **诊断事件流**：每条捕获事件按推断的严重度（error / warn / info / debug）展示，支持按 level、component 子串、**事件类型前缀**（如 `model.*`、`tool.*`、`session.*`、`gateway.*`）过滤
 - **对话内容审计** *(可选)*：列表按 sessionKey 折叠分组，支持**状态过滤**（全部 / 仅失败 / 仅成功）；详情页用**时间线 + 配对卡片**呈现——入站 / 每次 LLM 调用（input+output 同卡）/ 出站 / 错误按时间排序，**只渲染有数据的卡片**，半捕获跳会内嵌诊断 hint（默认 1 MiB 单段上限）。30 分钟无 host 更新的卡死 record（发送方掉线、host 中途崩溃）会被自动 sweep 并标记为 `abandoned`，内存有界。
-- **告警引擎** *(可选)*：定时评估滑动窗口指标（错误率、P95 延迟、调用量等），命中阈值时推送到通用 webhook 或钉钉自定义机器人；带冷却 + 恢复通知；活跃告警 / 规则状态 / 24h 历史在 Alerts 页查看
+- **告警引擎** *(可选)*：定时评估滑动窗口指标（错误率、P95 延迟、调用量、以及 host ≥ 2026.5.14 起的 `avgContextUtilizationPct` / `peakContextUtilizationPct`），命中阈值时推送到通用 webhook 或钉钉自定义机器人；带冷却 + 恢复通知；活跃告警 / 规则状态 / 24h 历史在 Alerts 页查看
 - **成本 / Token 经济学** *(需要 audit 安全门 + 上游返回 usage)*：按 provider/model 配置价格表（input/output/cacheRead/cacheWrite per 1k tokens）；滑动窗口实时成本 + 今日 / 本周 / 本月 / 近 30 天的持久化日级累计 (UTC)；按 model / channel / source 拆分。Token 数据来自 `llm_output` hook 的 `usage` 字段——如果上游 LLM provider 在 OpenAI 兼容响应里不返回 usage（部分自建网关 / 代理会忽略），Costs 页会一直为 0（页面会自动检测并提示）
 - **诊断 / Top-N 下钻**：把聚合指标变成可点击的个案——最慢的 `model.call.completed`、Token 消耗最多的对话、按 provider × model × errorCategory 聚类的错误、按工具失败率排序；每行可跳到 Run Detail / Conversation Detail。时间窗可选 15m / 1h / 6h / 24h。
 - **实时流**：SSE 推送 `/api/monitor/stream`，仪表板自动订阅
@@ -163,6 +163,7 @@ http://<gateway-host>:<port>/monitor/
 | `GET /api/monitor/models` | 每 provider × model 调用统计 + token |
 | `GET /api/monitor/tools` | 每 tool 执行统计 |
 | `GET /api/monitor/sources` | 按入口来源（openai-api / control-ui / channel:*）统计 |
+| `GET /api/monitor/harnesses` | 按 harness 后端聚合（如 `pi`、`codex-app-server`）；host < 2026.5.14 时返回空 |
 | `GET /api/monitor/runs?limit=` | harness 运行列表 |
 | `GET /api/monitor/runs/:runId` | 单次运行详情 + 事件 trace |
 | `GET /api/monitor/logs?level=&component=&type=&typePrefix=` | 诊断事件流（按推断 level / 子串 component / 精确 event type / 事件类型前缀如 `model.` 过滤） |

@@ -42,6 +42,13 @@ type DimensionAccumulator = {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   cost: number;
+  /** v0.9.8+. Sum of `(usage.total / contextTokenBudget) * 100` over events
+   *  that carried a budget. Mean is exposed as `avgContextUtilizationPct` and
+   *  is the operator-facing metric. */
+  contextUtilizationSum: number;
+  /** v0.9.8+. Number of events that contributed to contextUtilizationSum, so
+   *  the mean is finite even when some events lack a budget. */
+  contextUtilizationCount: number;
 };
 
 export type Aggregator = {
@@ -51,6 +58,9 @@ export type Aggregator = {
   models: () => DimensionRow[];
   tools: () => DimensionRow[];
   sources: () => DimensionRow[];
+  /** v0.9.8+. Harness backend (e.g. `pi`, `codex-app-server`) rollup. Empty
+   *  on hosts < 2026.5.14 that don't populate `llm_output.harnessId`. */
+  harnesses: () => DimensionRow[];
   series: (params: { metric: SeriesMetric; windowSec: number }) => SeriesResponse;
   reset: () => void;
 };
@@ -81,6 +91,11 @@ type EventTimePoint = {
     cacheWriteTokens: number;
     cost: number;
   };
+  /** v0.9.8+. Set on llm.tokens.recorded entries whose host event carried a
+   *  `contextTokenBudget` (host >= 2026.5.14). computeWindow uses this to
+   *  emit `avgContextUtilizationPct` / `peakContextUtilizationPct` on
+   *  WindowSnapshot. Undefined entries don't dilute the average. */
+  contextUtilizationPct?: number;
 };
 
 const MAX_RECENT_EVENTS = 10_000;
@@ -91,6 +106,10 @@ export function createAggregator(): Aggregator {
   const modelStats = new Map<string, DimensionAccumulator>();
   const toolStats = new Map<string, DimensionAccumulator>();
   const sourceStats = new Map<string, DimensionAccumulator>();
+  // v0.9.8+. Harness backend (e.g. `pi`, `codex-app-server`) is a routing
+  // dimension orthogonal to provider/model. Surfaced via host 2026.5.14+
+  // `llm_output.harnessId` — earlier hosts leave this dimension empty.
+  const harnessStats = new Map<string, DimensionAccumulator>();
 
   const seriesRings: Record<SeriesMetric, RingPoint[]> = {
     "events.total": [],
@@ -114,6 +133,8 @@ export function createAggregator(): Aggregator {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       cost: 0,
+      contextUtilizationSum: 0,
+      contextUtilizationCount: 0,
     };
     map.set(key, fresh);
     return fresh;
@@ -291,12 +312,24 @@ export function createAggregator(): Aggregator {
         cacheReadTokens?: number;
         cacheWriteTokens?: number;
         cost?: number;
+        contextTokenBudget?: number;
+        resolvedRef?: string;
+        harnessId?: string;
       };
       const inputTokens = tokenEvent.inputTokens ?? 0;
       const outputTokens = tokenEvent.outputTokens ?? 0;
       const cacheReadTokens = tokenEvent.cacheReadTokens ?? 0;
       const cacheWriteTokens = tokenEvent.cacheWriteTokens ?? 0;
       const cost = tokenEvent.cost ?? 0;
+      const totalTokens = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
+      // Context-budget utilization is computed once, here, and reused as a
+      // numeric facet on the recent ring AND every per-dimension
+      // accumulator that this event touches. Skip when budget is 0 or
+      // missing (host < 2026.5.14, or `allowConversationAccess` off).
+      const utilizationPct =
+        typeof tokenEvent.contextTokenBudget === "number" && tokenEvent.contextTokenBudget > 0
+          ? Math.min(100, (totalTokens / tokenEvent.contextTokenBudget) * 100)
+          : undefined;
 
       // The generic recent entry pushed at the top of ingest is missing the
       // token payload. We could rewrite it in place, but window math only
@@ -311,17 +344,35 @@ export function createAggregator(): Aggregator {
           cacheWriteTokens: (last.tokens?.cacheWriteTokens ?? 0) + cacheWriteTokens,
           cost: (last.tokens?.cost ?? 0) + cost,
         };
+        // Only stamp utilization when we have one for this event; merging
+        // (e.g. via max) on hit would conflate distinct hops, but in practice
+        // each llm.tokens.recorded event already represents one hop so we
+        // just assign.
+        if (utilizationPct !== undefined) last.contextUtilizationPct = utilizationPct;
       }
 
-      // Per-model rollup (provider/model key, same shape as the Models page).
-      if (tokenEvent.provider || tokenEvent.model) {
-        const key = `${tokenEvent.provider ?? "unknown"}/${tokenEvent.model ?? "unknown"}`;
+      const bumpUtilization = (acc: DimensionAccumulator): void => {
+        if (utilizationPct === undefined) return;
+        acc.contextUtilizationSum += utilizationPct;
+        acc.contextUtilizationCount += 1;
+      };
+
+      // Per-model rollup. Prefer the host-supplied resolvedRef (full
+      // `provider/model` with prefix) when present (2026.5.14+) — it
+      // disambiguates same-named models across providers. Falls back to the
+      // legacy `provider/model` composition otherwise so older hosts keep
+      // populating the dimension.
+      if (tokenEvent.resolvedRef || tokenEvent.provider || tokenEvent.model) {
+        const key =
+          tokenEvent.resolvedRef ??
+          `${tokenEvent.provider ?? "unknown"}/${tokenEvent.model ?? "unknown"}`;
         const acc = accFor(modelStats, key);
         acc.tokensIn += inputTokens;
         acc.tokensOut += outputTokens;
         acc.cacheReadTokens += cacheReadTokens;
         acc.cacheWriteTokens += cacheWriteTokens;
         acc.cost += cost;
+        bumpUtilization(acc);
       }
       // Per-channel rollup.
       if (tokenEvent.channel) {
@@ -331,6 +382,7 @@ export function createAggregator(): Aggregator {
         acc.cacheReadTokens += cacheReadTokens;
         acc.cacheWriteTokens += cacheWriteTokens;
         acc.cost += cost;
+        bumpUtilization(acc);
       }
       // Per-source rollup (derived from channel by extractSource).
       const tokenSource = extractSource({
@@ -345,6 +397,20 @@ export function createAggregator(): Aggregator {
         acc.cacheReadTokens += cacheReadTokens;
         acc.cacheWriteTokens += cacheWriteTokens;
         acc.cost += cost;
+        bumpUtilization(acc);
+      }
+      // Per-harness rollup (v0.9.8+). Only populated when host emits
+      // `llm_output.harnessId` (2026.5.14+). Older hosts skip this branch
+      // entirely and Harness page will be empty — that's expected and is
+      // surfaced to the operator as an info banner on the UI side.
+      if (tokenEvent.harnessId) {
+        const acc = accFor(harnessStats, tokenEvent.harnessId);
+        acc.tokensIn += inputTokens;
+        acc.tokensOut += outputTokens;
+        acc.cacheReadTokens += cacheReadTokens;
+        acc.cacheWriteTokens += cacheWriteTokens;
+        acc.cost += cost;
+        bumpUtilization(acc);
       }
     }
   };
@@ -369,9 +435,16 @@ export function createAggregator(): Aggregator {
       sessionsAlerted: 0,
       totalTokens: 0,
       totalCost: 0,
+      avgContextUtilizationPct: null,
+      peakContextUtilizationPct: null,
     };
     void now;
     const modelDurations: number[] = [];
+    // Collected separately rather than inline-summed so the snapshot can
+    // distinguish "no priced events in window" (null) from "every event was
+    // 0% utilization" (which would round to 0 but is informationally
+    // different — the host did report a budget).
+    const utilizations: number[] = [];
     // Note: we used to early-break on the first point with ts < cutoffMs
     // assuming `recent` is monotonically increasing. That assumption broke
     // at startup: the replay path (`service.start`) is async and fanout is
@@ -421,9 +494,20 @@ export function createAggregator(): Aggregator {
           point.tokens.cacheWriteTokens;
         snap.totalCost += point.tokens.cost;
       }
+      if (typeof point.contextUtilizationPct === "number") {
+        utilizations.push(point.contextUtilizationPct);
+      }
     }
     if (modelDurations.length > 0) {
       snap.modelP95Ms = percentile(modelDurations, 0.95);
+    }
+    if (utilizations.length > 0) {
+      const sum = utilizations.reduce((acc, v) => acc + v, 0);
+      snap.avgContextUtilizationPct = sum / utilizations.length;
+      snap.peakContextUtilizationPct = utilizations.reduce(
+        (acc, v) => (v > acc ? v : acc),
+        utilizations[0],
+      );
     }
     return snap;
   };
@@ -442,6 +526,10 @@ export function createAggregator(): Aggregator {
   const dimensionRows = (map: Map<string, DimensionAccumulator>): DimensionRow[] => {
     const rows: DimensionRow[] = [];
     for (const [key, acc] of map) {
+      const avgUtil =
+        acc.contextUtilizationCount > 0
+          ? acc.contextUtilizationSum / acc.contextUtilizationCount
+          : undefined;
       rows.push({
         key,
         total: acc.total,
@@ -453,6 +541,7 @@ export function createAggregator(): Aggregator {
         ...(acc.cacheReadTokens > 0 ? { cacheReadTokens: acc.cacheReadTokens } : {}),
         ...(acc.cacheWriteTokens > 0 ? { cacheWriteTokens: acc.cacheWriteTokens } : {}),
         ...(acc.cost > 0 ? { cost: acc.cost } : {}),
+        ...(avgUtil !== undefined ? { avgContextUtilizationPct: avgUtil } : {}),
       });
     }
     rows.sort((a, b) => b.total - a.total);
@@ -463,6 +552,7 @@ export function createAggregator(): Aggregator {
   const models: Aggregator["models"] = () => dimensionRows(modelStats);
   const tools: Aggregator["tools"] = () => dimensionRows(toolStats);
   const sources: Aggregator["sources"] = () => dimensionRows(sourceStats);
+  const harnesses: Aggregator["harnesses"] = () => dimensionRows(harnessStats);
 
   const series: Aggregator["series"] = ({ metric, windowSec }) => {
     const ring = seriesRings[metric];
@@ -487,12 +577,13 @@ export function createAggregator(): Aggregator {
     modelStats.clear();
     toolStats.clear();
     sourceStats.clear();
+    harnessStats.clear();
     for (const key of Object.keys(seriesRings) as SeriesMetric[]) {
       seriesRings[key].length = 0;
     }
   };
 
-  return { ingest, windows, channels, models, tools, sources, series, reset };
+  return { ingest, windows, channels, models, tools, sources, harnesses, series, reset };
 }
 
 function percentile(values: number[], q: number): number {

@@ -48,6 +48,14 @@ export type WindowSnapshot = {
   totalTokens: number;
   /** Pre-priced cost in the configured currency. v0.8.0+. */
   totalCost: number;
+  /** Mean of `usage.total / contextTokenBudget` × 100 over llm.tokens.recorded
+   *  events that carry a budget. Host emits this since 2026.5.14 (decision
+   *  #59); null when no priced event in the window had a budget. v0.9.8+. */
+  avgContextUtilizationPct: number | null;
+  /** Peak per-event context utilization in this window (same scale as the
+   *  average). Surfaces the worst single call rather than the mean — useful
+   *  for alerting when a single hop near the cap precedes truncation. v0.9.8+. */
+  peakContextUtilizationPct: number | null;
 };
 
 export type DimensionRow = {
@@ -64,6 +72,10 @@ export type DimensionRow = {
   cacheWriteTokens?: number;
   /** v0.8.0+. Priced cost in the configured currency. */
   cost?: number;
+  /** v0.9.8+. Mean context-budget utilization (0-100) over priced events
+   *  recorded against this dimension. Omitted when no priced event carried a
+   *  budget (host < 2026.5.14 or `allowConversationAccess` off). */
+  avgContextUtilizationPct?: number;
 };
 
 export type RunSnapshot = {

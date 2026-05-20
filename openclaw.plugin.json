@@ -204,7 +204,9 @@
                     "messageErrors",
                     "webhookEvents",
                     "webhookErrors",
-                    "sessionsAlerted"
+                    "sessionsAlerted",
+                    "avgContextUtilizationPct",
+                    "peakContextUtilizationPct"
                   ],
                   "description": "Which WindowSnapshot field to compare. See src/types.ts: WindowSnapshot."
                 },

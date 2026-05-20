@@ -30,6 +30,7 @@ const NAV_GROUPS: ReadonlyArray<ReadonlyArray<{ to: string; key: StringKey }>> =
     { to: "/channels", key: "nav.channels" },
     { to: "/models", key: "nav.models" },
     { to: "/tools", key: "nav.tools" },
+    { to: "/harnesses", key: "nav.harnesses" },
   ],
   // Drill-down
   [

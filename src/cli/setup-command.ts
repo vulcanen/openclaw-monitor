@@ -7,38 +7,61 @@ export type SetupOptions = {
   audit?: boolean;
 };
 
+export type MonitorCliContext = {
+  api: OpenClawPluginApi;
+  logger: PluginLogger;
+};
+
+export const MONITOR_CLI_OPTIONS = {
+  commands: ["monitor"],
+  descriptors: [
+    {
+      name: "monitor",
+      description: "OpenClaw Monitor plugin commands",
+      hasSubcommands: true,
+    },
+  ],
+} as const;
+
+/**
+ * Build the `openclaw monitor *` command tree on a Commander program.
+ *
+ * Shared by both the main plugin entry (`src/index.ts`) and the CLI-metadata
+ * entry (`cli-metadata.js`). The CLI-metadata entry is what host 5.18 loads
+ * in its dedicated metadata pass — see decision #58 in
+ * rules/host-contract.md for the load-path split.
+ */
+export function buildMonitorCommands(program: Command, ctx: MonitorCliContext): void {
+  const { api, logger } = ctx;
+  const root = program.command("monitor").description("OpenClaw Monitor plugin commands");
+
+  root
+    .command("setup")
+    .description("Trust openclaw-monitor and (optionally) enable conversation audit")
+    .option(
+      "--audit",
+      "Also enable M5 content audit (writes allowConversationAccess + audit.enabled)",
+    )
+    .action(async (opts: SetupOptions) => {
+      await runSetup({ api, logger, audit: Boolean(opts.audit) });
+    });
+
+  root
+    .command("status")
+    .description("Show effective config flags for openclaw-monitor")
+    .action(() => {
+      showStatus({ api, logger });
+    });
+}
+
 export function registerSetupCli(api: OpenClawPluginApi): void {
   api.registerCli(
     ({ program, logger }) => {
-      const root = program.command("monitor").description("OpenClaw Monitor plugin commands");
-
-      root
-        .command("setup")
-        .description("Trust openclaw-monitor and (optionally) enable conversation audit")
-        .option(
-          "--audit",
-          "Also enable M5 content audit (writes allowConversationAccess + audit.enabled)",
-        )
-        .action(async (opts: SetupOptions) => {
-          await runSetup({ api, logger, audit: Boolean(opts.audit) });
-        });
-
-      root
-        .command("status")
-        .description("Show effective config flags for openclaw-monitor")
-        .action(() => {
-          showStatus({ api, logger });
-        });
+      buildMonitorCommands(program, { api, logger });
     },
     {
-      commands: ["monitor"],
-      descriptors: [
-        {
-          name: "monitor",
-          description: "OpenClaw Monitor plugin commands",
-          hasSubcommands: true,
-        },
-      ],
+      commands: [...MONITOR_CLI_OPTIONS.commands],
+      descriptors: MONITOR_CLI_OPTIONS.descriptors.map((d) => ({ ...d })),
     },
   );
 }

@@ -150,6 +150,10 @@ function applyTokenEvents(
     cacheReadTokens: number;
     cacheWriteTokens: number;
     cost: number;
+    // v0.9.8+. utilSum / utilCount drive the per-row
+    // avgContextUtilizationPct; events without a budget never contribute.
+    utilSum: number;
+    utilCount: number;
   };
   const byKey = new Map<string, TokenTotals>();
   for (const evt of tokenEvents) {
@@ -159,15 +163,33 @@ function applyTokenEvents(
     if (!key) continue;
     let t = byKey.get(key);
     if (!t) {
-      t = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 };
+      t = {
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0,
+        utilSum: 0,
+        utilCount: 0,
+      };
       byKey.set(key, t);
     }
     const p = evt.payload;
-    t.tokensIn += asNumber(p["inputTokens"]) ?? 0;
-    t.tokensOut += asNumber(p["outputTokens"]) ?? 0;
-    t.cacheReadTokens += asNumber(p["cacheReadTokens"]) ?? 0;
-    t.cacheWriteTokens += asNumber(p["cacheWriteTokens"]) ?? 0;
+    const inputTokens = asNumber(p["inputTokens"]) ?? 0;
+    const outputTokens = asNumber(p["outputTokens"]) ?? 0;
+    const cacheReadTokens = asNumber(p["cacheReadTokens"]) ?? 0;
+    const cacheWriteTokens = asNumber(p["cacheWriteTokens"]) ?? 0;
+    t.tokensIn += inputTokens;
+    t.tokensOut += outputTokens;
+    t.cacheReadTokens += cacheReadTokens;
+    t.cacheWriteTokens += cacheWriteTokens;
     t.cost += asNumber(p["cost"]) ?? 0;
+    const budget = asNumber(p["contextTokenBudget"]);
+    if (budget && budget > 0) {
+      const total = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
+      t.utilSum += Math.min(100, (total / budget) * 100);
+      t.utilCount += 1;
+    }
   }
   // Merge token totals back into existing rows; emit fresh rows for keys
   // that only appeared in token events.
@@ -183,6 +205,7 @@ function applyTokenEvents(
       ...(t.cacheReadTokens > 0 ? { cacheReadTokens: t.cacheReadTokens } : {}),
       ...(t.cacheWriteTokens > 0 ? { cacheWriteTokens: t.cacheWriteTokens } : {}),
       ...(t.cost > 0 ? { cost: t.cost } : {}),
+      ...(t.utilCount > 0 ? { avgContextUtilizationPct: t.utilSum / t.utilCount } : {}),
     };
   });
   for (const [key, t] of byKey) {
@@ -198,6 +221,7 @@ function applyTokenEvents(
       ...(t.cacheReadTokens > 0 ? { cacheReadTokens: t.cacheReadTokens } : {}),
       ...(t.cacheWriteTokens > 0 ? { cacheWriteTokens: t.cacheWriteTokens } : {}),
       ...(t.cost > 0 ? { cost: t.cost } : {}),
+      ...(t.utilCount > 0 ? { avgContextUtilizationPct: t.utilSum / t.utilCount } : {}),
     });
   }
   out.sort((a, b) => b.total - a.total);
@@ -310,4 +334,24 @@ export function sourcesFromEvents(
 
 function evtOutcome(evt: RawEvent): string | undefined {
   return asString(evt.payload["outcome"]);
+}
+
+/**
+ * llm.tokens.recorded → key=harnessId (v0.9.8+). Returns [] when host doesn't
+ * populate harnessId (< 2026.5.14) or when audit gate is off so the field is
+ * absent on every event. UI page surfaces this as an info banner.
+ */
+export function harnessesFromEvents(tokenEvents: RawEvent[], cutoffMs: number): DimensionRow[] {
+  // Build an empty `rows=[]` then layer token totals on. Harness counts =
+  // distinct token-event hops (no `total` semantics independent of tokens —
+  // unlike Models, where a model.call.completed without a paired
+  // llm_output still bumps total).
+  const keyFor = (evt: RawEvent): string | undefined => asString(evt.payload["harnessId"]);
+  const base = buildRows(
+    tokenEvents.filter((e) => e.type === "llm.tokens.recorded"),
+    cutoffMs,
+    keyFor,
+    () => false,
+  );
+  return applyTokenEvents(base, tokenEvents, cutoffMs, keyFor);
 }

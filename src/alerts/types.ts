@@ -26,6 +26,12 @@ export const ALERT_METRICS: readonly AlertMetric[] = [
   "webhookEvents",
   "webhookErrors",
   "sessionsAlerted",
+  // v0.9.8+. Available only when host 2026.5.14+ populates
+  // `llm_output.contextTokenBudget` AND `allowConversationAccess` is on.
+  // Engine reads `null` as "no data" and never fires — safe to keep enabled
+  // by default for new rules.
+  "avgContextUtilizationPct",
+  "peakContextUtilizationPct",
 ] as const;
 
 export type AlertWindow = keyof WindowedMetrics; // "1m" | "5m" | "15m" | "1h"

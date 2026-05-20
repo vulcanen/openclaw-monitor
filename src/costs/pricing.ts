@@ -74,6 +74,15 @@ export function buildTokenEvent(params: {
     cacheWriteTokens?: number;
   };
   seq?: number;
+  /** Optional 2026.5.14+ fields forwarded verbatim onto the token event so
+   *  downstream consumers (aggregator window snapshots, Costs / Models UI)
+   *  can compute context utilization without re-reading hook events.
+   *  See decision #59 in rules/host-contract.md. */
+  contextTokenBudget?: number;
+  contextWindowSource?: "model" | "modelsConfig" | "agentContextTokens" | "default";
+  contextWindowReferenceTokens?: number;
+  resolvedRef?: string;
+  harnessId?: string;
 }): TokenRecordedEvent {
   const price = lookupPrice(params.pricing, params.provider, params.model);
   const cost = computeCost(params.usage, price);
@@ -102,5 +111,16 @@ export function buildTokenEvent(params: {
     currency: params.pricing.currency,
     ts: Date.now(),
     ...(params.seq !== undefined ? { seq: params.seq } : {}),
+    ...(params.contextTokenBudget !== undefined
+      ? { contextTokenBudget: params.contextTokenBudget }
+      : {}),
+    ...(params.contextWindowSource !== undefined
+      ? { contextWindowSource: params.contextWindowSource }
+      : {}),
+    ...(params.contextWindowReferenceTokens !== undefined
+      ? { contextWindowReferenceTokens: params.contextWindowReferenceTokens }
+      : {}),
+    ...(params.resolvedRef !== undefined ? { resolvedRef: params.resolvedRef } : {}),
+    ...(params.harnessId !== undefined ? { harnessId: params.harnessId } : {}),
   };
 }

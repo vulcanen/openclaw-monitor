@@ -96,6 +96,24 @@ export type TokenRecordedEvent = {
   /** ISO timestamp produced at hook-fire time (not when persisted). */
   ts: number;
   seq?: number;
+  /** Effective context-token budget after model/config/agent caps. Host emits
+   *  this on `llm_output` since 2026.5.14 (decision #59); plugin forwards it
+   *  verbatim so downstream consumers can compute utilization without
+   *  re-resolving the budget. Absent when the host predates 2026.5.14. */
+  contextTokenBudget?: number;
+  /** Which layer supplied the resolved budget (model / modelsConfig /
+   *  agentContextTokens / default). Diagnostic-only. v0.9.8+. */
+  contextWindowSource?: "model" | "modelsConfig" | "agentContextTokens" | "default";
+  /** Native / configured reference window when a lower cap won. v0.9.8+. */
+  contextWindowReferenceTokens?: number;
+  /** Full `provider/model` reference (e.g. `openai-codex/gpt-5.4`) preserving
+   *  the provider prefix so `openai-codex/gpt-5.4` and `codex/gpt-5.4` stay
+   *  distinguishable even when display names collapse. v0.9.8+. */
+  resolvedRef?: string;
+  /** Harness / backend id that ran this model loop (e.g. `pi`, `codex-app-
+   *  server`). Provides a routing dimension orthogonal to provider/model.
+   *  v0.9.8+. */
+  harnessId?: string;
 };
 
 /**

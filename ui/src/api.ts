@@ -108,6 +108,12 @@ export type WindowSnapshot = {
   webhookEvents: number;
   webhookErrors: number;
   sessionsAlerted: number;
+  totalTokens?: number;
+  totalCost?: number;
+  /** v0.9.8+. Null when no priced event in the window carried a budget
+   *  (host < 2026.5.14 or audit gate off). */
+  avgContextUtilizationPct?: number | null;
+  peakContextUtilizationPct?: number | null;
 };
 
 export type WindowedMetrics = Record<"1m" | "5m" | "15m" | "1h", WindowSnapshot>;
@@ -128,6 +134,12 @@ export type DimensionRow = {
   p95Ms: number | null;
   tokensIn?: number;
   tokensOut?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cost?: number;
+  /** v0.9.8+. Mean context-budget utilization (0-100). Only present when
+   *  the host populates `llm_output.contextTokenBudget` (≥ 2026.5.14). */
+  avgContextUtilizationPct?: number;
 };
 
 export type RunSnapshot = {
@@ -277,6 +289,8 @@ export const api = {
   models: () => getJson<{ rows: DimensionRow[] }>("/models"),
   tools: () => getJson<{ rows: DimensionRow[] }>("/tools"),
   sources: () => getJson<{ rows: DimensionRow[] }>("/sources"),
+  // v0.9.8+. Empty rows on hosts < 2026.5.14 — UI page renders an info banner.
+  harnesses: () => getJson<{ rows: DimensionRow[] }>("/harnesses"),
   runs: (limit = 50) => getJson<{ active: number; runs: RunSnapshot[] }>(`/runs?limit=${limit}`),
   runDetail: (runId: string) =>
     getJson<{

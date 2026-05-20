@@ -5,6 +5,7 @@ export const zh = {
   "nav.channels": "通道",
   "nav.models": "模型",
   "nav.tools": "工具",
+  "nav.harnesses": "执行框架",
   "nav.runs": "运行",
   "nav.sessions": "会话",
   "nav.conversations": "对话",
@@ -250,6 +251,8 @@ export const zh = {
   "stat.errorRateWindow": "错误率 ({window})",
   "stat.modelP95Window": "模型 P95 ({window})",
   "stat.sessionAlertsWindow": "会话告警 ({window})",
+  "stat.ctxUtilAvgWindow": "上下文利用率 平均 ({window})",
+  "stat.ctxUtilPeakWindow": "上下文利用率 峰值 ({window})",
   "stat.errors": "{count} 个错误",
   "stat.errorRateDetail": "{errors}/{total}",
   "stat.latency": "延迟",
@@ -287,6 +290,14 @@ export const zh = {
     'OpenClaw 的 INTERNAL_MESSAGE_CHANNEL 常量是 "webchat"，覆盖 /v1/chat/completions、Control UI、heartbeat / cron 等所有非 channel-plugin 入口。要按入口路径拆分请看「来源」页。',
 
   // Models
+  "harnesses.title": "执行框架",
+  "harnesses.subtitle":
+    "按 harness 后端聚合的 token / 成本 / 利用率（v0.9.8+）。需要 host 2026.5.14+ 在 llm_output 上发送 harnessId 字段，且 conversation 访问门已开。",
+  "harnesses.rollup": "执行框架汇总",
+  "harnesses.col.key": "Harness",
+  "harnesses.empty.noField":
+    "未收到 harnessId 数据。要么 host 版本低于 2026.5.14（决策 #59），要么 conversation 访问门未开启（跑 `openclaw monitor setup --audit`）。",
+
   "models.title": "模型",
   "models.subtitle": "按 provider × model 的调用分布",
   "models.rollup": "模型维度统计",
@@ -339,6 +350,7 @@ export const zh = {
   "dim.col.p95": "p95",
   "dim.col.tokensIn": "输入 token",
   "dim.col.tokensOut": "输出 token",
+  "dim.col.ctxUtil": "上下文利用率",
 
   // Logs
   "logs.title": "日志",

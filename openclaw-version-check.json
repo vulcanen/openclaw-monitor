@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "_description": "Tracks the periodic check of upstream OpenClaw stable releases. See CLAUDE.md decision #40. Updated by Claude every 48h.",
-  "currentBaselineVersion": "2026.5.7",
+  "currentBaselineVersion": "2026.5.18",
   "checkIntervalHours": 48,
-  "lastCheckedAt": "2026-05-12T12:30:00Z",
-  "latestStableObserved": "v2026.5.7",
-  "latestStablePublishedAt": "2026-05-07T20:57:43Z",
+  "lastCheckedAt": "2026-05-19T12:35:00Z",
+  "latestStableObserved": "v2026.5.18",
+  "latestStablePublishedAt": "2026-05-18T00:00:00Z",
   "assessment": "no-action",
-  "assessmentNotes": "latest stable is v2026.5.7 — same as plugin baseline; no upstream changes to evaluate. (Beta channel has v2026.5.10-beta.* but pre-releases are explicitly ignored per the rule.)",
+  "assessmentNotes": "v0.9.8 bumps baseline 2026.5.7 → 2026.5.18 (operator-authorized): all five tags in package.json's openclaw section now read 2026.5.18, devDependencies.openclaw upgraded, typecheck + tests + lint + build all green against the new SDK. Two-pass CLI loader fixed via cli-metadata.js (decision #58). contextTokenBudget / resolvedRef / harnessId / tool-ctx channelId integrated (decision #59). 11 new lifecycle hooks subscribed (subagent / agent.run / agent.finalize / session reset / model resolve / cron / heartbeat / inbound claim / message dispatch). v0.9.3's decision #40 description previously misplaced these fields under openclaw.plugin.json — v0.9.8 corrects the docs.",
   "releasesUrl": "https://github.com/openclaw/openclaw/releases",
   "apiUrl": "https://api.github.com/repos/openclaw/openclaw/releases"
 }

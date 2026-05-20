@@ -25,6 +25,10 @@ export function DimensionTable({ rows, keyLabel, showTokens = false }: Props) {
   if (rows.length === 0) {
     return <div className="empty">{t("empty.dataYet")}</div>;
   }
+  // Only show the Context Utilization column when at least one row carries a
+  // value. On hosts < 2026.5.14 (or with audit gate off) every row will be
+  // undefined and the column adds noise — keep the table compact in that case.
+  const showUtilization = rows.some((r) => typeof r.avgContextUtilizationPct === "number");
   return (
     <table>
       <thead>
@@ -37,6 +41,7 @@ export function DimensionTable({ rows, keyLabel, showTokens = false }: Props) {
           <th className="num">{t("dim.col.p95")}</th>
           {showTokens ? <th className="num">{t("dim.col.tokensIn")}</th> : null}
           {showTokens ? <th className="num">{t("dim.col.tokensOut")}</th> : null}
+          {showUtilization ? <th className="num">{t("dim.col.ctxUtil")}</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -71,6 +76,13 @@ export function DimensionTable({ rows, keyLabel, showTokens = false }: Props) {
               <td className="num">{fmtMs(row.p95Ms)}</td>
               {showTokens ? <td className="num">{row.tokensIn ?? 0}</td> : null}
               {showTokens ? <td className="num">{row.tokensOut ?? 0}</td> : null}
+              {showUtilization ? (
+                <td className="num">
+                  {typeof row.avgContextUtilizationPct === "number"
+                    ? `${row.avgContextUtilizationPct.toFixed(1)}%`
+                    : "—"}
+                </td>
+              ) : null}
             </tr>
           );
         })}

@@ -435,6 +435,15 @@ export function createMonitorService(configOverride?: Partial<MonitorConfig>): M
       handler: createDimensionHandler(() => aggregator.sources()),
     },
     {
+      // v0.9.8+. Empty rows when host < 2026.5.14 doesn't populate
+      // `llm_output.harnessId`. UI surfaces an info banner in that case.
+      path: "/api/monitor/harnesses",
+      auth: "gateway",
+      match: "exact",
+      gatewayRuntimeScopeSurface: "trusted-operator",
+      handler: createDimensionHandler(() => aggregator.harnesses()),
+    },
+    {
       path: "/api/monitor/runs",
       auth: "gateway",
       match: "exact",

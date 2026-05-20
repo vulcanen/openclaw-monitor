@@ -17,6 +17,17 @@ export type EventDimensions = {
   sessionId?: string;
   sessionKey?: string;
   trigger?: string;
+  /** v0.9.8+. Forwarded from host 2026.5.14+ hook events (decision #59).
+   *  Aggregator uses (tokenSum / budget) to compute window-level context
+   *  utilization on llm.tokens.recorded events. */
+  contextTokenBudget?: number;
+  /** v0.9.8+. Full `provider/model` ref (with provider prefix) from
+   *  `llm_output.resolvedRef`. Preserves disambiguation between same-named
+   *  models across providers. */
+  resolvedRef?: string;
+  /** v0.9.8+. Harness backend id (e.g. `pi`, `codex-app-server`) from
+   *  `llm_output.harnessId` — orthogonal to provider/model. */
+  harnessId?: string;
 };
 
 function asString(value: unknown): string | undefined {
@@ -64,6 +75,13 @@ export function extractDimensions(event: DiagnosticEventPayload): EventDimension
   if (tokensIn !== undefined) dims.tokensIn = tokensIn;
   const tokensOut = asNumber(raw["tokensOut"]) ?? asNumber(raw["outputTokens"]);
   if (tokensOut !== undefined) dims.tokensOut = tokensOut;
+
+  const contextTokenBudget = asNumber(raw["contextTokenBudget"]);
+  if (contextTokenBudget !== undefined) dims.contextTokenBudget = contextTokenBudget;
+  const resolvedRef = asString(raw["resolvedRef"]);
+  if (resolvedRef) dims.resolvedRef = resolvedRef;
+  const harnessId = asString(raw["harnessId"]);
+  if (harnessId) dims.harnessId = harnessId;
 
   if (event.type.endsWith(".error") || event.type === "session.stuck") {
     dims.outcome = "error";
